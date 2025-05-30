@@ -1,5 +1,5 @@
 import { credentialTemplates as staticTemplates, type CredentialTemplate } from "./credential-templates"
-import { MockVCMClient } from "./vcm-client"
+import { VCMBrowserClient } from "./vcm-client-browser"
 import { VCMConfigManager } from "./vcm-config"
 
 export interface EnhancedCredentialTemplate extends CredentialTemplate {
@@ -11,6 +11,10 @@ export interface EnhancedCredentialTemplate extends CredentialTemplate {
 
 export class CredentialTemplateManager {
   private static SYNCED_TEMPLATES_KEY = "vcm_synced_templates"
+
+  private static isClient(): boolean {
+    return typeof window !== "undefined"
+  }
 
   static async getAllTemplates(): Promise<EnhancedCredentialTemplate[]> {
     const staticTemplatesEnhanced: EnhancedCredentialTemplate[] = staticTemplates.map((template) => ({
@@ -39,7 +43,7 @@ export class CredentialTemplateManager {
   }
 
   static getSyncedTemplates(): EnhancedCredentialTemplate[] {
-    if (typeof window === "undefined") {
+    if (!this.isClient()) {
       return []
     }
 
@@ -53,7 +57,7 @@ export class CredentialTemplateManager {
   }
 
   static saveSyncedTemplates(templates: EnhancedCredentialTemplate[]): void {
-    if (typeof window === "undefined") {
+    if (!this.isClient()) {
       return
     }
 
@@ -81,8 +85,8 @@ export class CredentialTemplateManager {
     }
 
     try {
-      // Use MockVCMClient for demo, replace with VCMClient for production
-      const client = new MockVCMClient(config)
+      // Use VCMBrowserClient for browser-safe operations
+      const client = new VCMBrowserClient(config, true) // Use mock data for demo
       const vcmTypes = await client.getCredentialTypes()
 
       const syncedTemplates: EnhancedCredentialTemplate[] = []
@@ -93,7 +97,7 @@ export class CredentialTemplateManager {
           const template = this.convertVCMTypeToTemplate(vcmType)
           syncedTemplates.push(template)
         } catch (error) {
-          errors.push(`Failed to convert ${vcmType.name}: ${error.message}`)
+          errors.push(`Failed to convert ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`)
         }
       }
 
@@ -177,8 +181,12 @@ export class CredentialTemplateManager {
   }
 
   static clearSyncedTemplates(): void {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(this.SYNCED_TEMPLATES_KEY)
+    if (this.isClient()) {
+      try {
+        localStorage.removeItem(this.SYNCED_TEMPLATES_KEY)
+      } catch (error) {
+        console.error("Failed to clear synced templates:", error)
+      }
     }
   }
 

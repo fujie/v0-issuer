@@ -225,7 +225,11 @@ export class VCMBrowserClient {
     updatedTemplates.push(template)
 
     if (typeof window !== "undefined") {
-      localStorage.setItem("vcm_synced_templates", JSON.stringify(updatedTemplates))
+      try {
+        localStorage.setItem("vcm_synced_templates", JSON.stringify(updatedTemplates))
+      } catch (error) {
+        console.error("Failed to save credential type to localStorage:", error)
+      }
     }
   }
 
