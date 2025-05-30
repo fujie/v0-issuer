@@ -24,9 +24,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log(`Testing VCM connection to: ${baseUrl}`)
+
     // Test the health endpoint first
     try {
-      const healthResponse = await fetch(`${baseUrl}/api/health`, {
+      const healthEndpoint = `${baseUrl}/api/health`
+      console.log(`Checking health endpoint: ${healthEndpoint}`)
+
+      const healthResponse = await fetch(healthEndpoint, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -35,12 +40,18 @@ export async function POST(request: NextRequest) {
         signal: AbortSignal.timeout(10000), // 10 seconds
       })
 
+      console.log(`Health endpoint response status: ${healthResponse.status}`)
+
       if (healthResponse.ok) {
         const healthData = await healthResponse.json()
+        console.log("Health endpoint data:", healthData)
 
         // Test authentication with the integrations endpoint
         try {
-          const authResponse = await fetch(`${baseUrl}/api/integrations/test`, {
+          const testEndpoint = `${baseUrl}/api/integrations/test`
+          console.log(`Testing auth endpoint: ${testEndpoint}`)
+
+          const authResponse = await fetch(testEndpoint, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -54,6 +65,8 @@ export async function POST(request: NextRequest) {
             signal: AbortSignal.timeout(10000),
           })
 
+          console.log(`Auth endpoint response status: ${authResponse.status}`)
+
           if (authResponse.ok) {
             return NextResponse.json({
               success: true,
@@ -61,28 +74,41 @@ export async function POST(request: NextRequest) {
               version: healthData.version || "unknown",
             })
           } else {
-            const errorData = await authResponse.json().catch(() => ({}))
+            let errorMessage = `認証エラー (${authResponse.status}): ${authResponse.statusText}`
+            try {
+              const errorData = await authResponse.json()
+              errorMessage = `認証エラー (${authResponse.status}): ${errorData.message || authResponse.statusText}`
+            } catch (e) {
+              // If we can't parse JSON, just use the status text
+            }
+
             return NextResponse.json({
               success: false,
-              message: `認証エラー (${authResponse.status}): ${errorData.message || authResponse.statusText}`,
+              message: errorMessage,
+              statusCode: authResponse.status,
             })
           }
         } catch (authError) {
+          console.error("Auth endpoint error:", authError)
           return NextResponse.json({
             success: false,
             message: `認証テストでエラーが発生しました: ${authError instanceof Error ? authError.message : "不明なエラー"}`,
+            error: authError instanceof Error ? authError.name : "UnknownError",
           })
         }
       } else {
         return NextResponse.json({
           success: false,
           message: `VCMサーバーに接続できません (${healthResponse.status}): ${healthResponse.statusText}`,
+          statusCode: healthResponse.status,
         })
       }
     } catch (healthError) {
+      console.error("Health endpoint error:", healthError)
       return NextResponse.json({
         success: false,
         message: `VCMサーバーへの接続でエラーが発生しました: ${healthError instanceof Error ? healthError.message : "不明なエラー"}`,
+        error: healthError instanceof Error ? healthError.name : "UnknownError",
       })
     }
   } catch (error) {
@@ -91,6 +117,7 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         message: `接続テストでエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
+        error: error instanceof Error ? error.name : "UnknownError",
       },
       { status: 500 },
     )
