@@ -1,4 +1,4 @@
-// VCM Configuration Management with SSR safety
+// VCM Configuration Management
 export interface VCMConnectionConfig {
   baseUrl: string
   apiKey: string
@@ -9,6 +9,7 @@ export interface VCMConnectionConfig {
   lastSync?: string
   webhookSecret?: string
   integrationId?: string
+  useMockData?: boolean // デモモードの状態を保存
 }
 
 export interface VCMSyncSettings {
@@ -24,12 +25,8 @@ const VCM_CONFIG_KEY = "vcm_connection_config"
 const VCM_SYNC_SETTINGS_KEY = "vcm_sync_settings"
 
 export class VCMConfigManager {
-  private static isClient(): boolean {
-    return typeof window !== "undefined"
-  }
-
   static getConfig(): VCMConnectionConfig | null {
-    if (!this.isClient()) {
+    if (typeof window === "undefined") {
       return null
     }
 
@@ -40,6 +37,7 @@ export class VCMConfigManager {
         // Ensure default values for new fields
         return {
           webhookSecret: "whisec_lf1jah5h",
+          useMockData: true, // デフォルトでデモモード
           ...config,
         }
       }
@@ -50,17 +48,13 @@ export class VCMConfigManager {
   }
 
   static saveConfig(config: VCMConnectionConfig): void {
-    if (this.isClient()) {
-      try {
-        localStorage.setItem(VCM_CONFIG_KEY, JSON.stringify(config))
-      } catch (error) {
-        console.error("Failed to save VCM config:", error)
-      }
+    if (typeof window !== "undefined") {
+      localStorage.setItem(VCM_CONFIG_KEY, JSON.stringify(config))
     }
   }
 
   static getSyncSettings(): VCMSyncSettings {
-    if (!this.isClient()) {
+    if (typeof window === "undefined") {
       return this.getDefaultSyncSettings()
     }
 
@@ -81,23 +75,15 @@ export class VCMConfigManager {
   }
 
   static saveSyncSettings(settings: VCMSyncSettings): void {
-    if (this.isClient()) {
-      try {
-        localStorage.setItem(VCM_SYNC_SETTINGS_KEY, JSON.stringify(settings))
-      } catch (error) {
-        console.error("Failed to save VCM sync settings:", error)
-      }
+    if (typeof window !== "undefined") {
+      localStorage.setItem(VCM_SYNC_SETTINGS_KEY, JSON.stringify(settings))
     }
   }
 
   static clearConfig(): void {
-    if (this.isClient()) {
-      try {
-        localStorage.removeItem(VCM_CONFIG_KEY)
-        localStorage.removeItem(VCM_SYNC_SETTINGS_KEY)
-      } catch (error) {
-        console.error("Failed to clear VCM config:", error)
-      }
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(VCM_CONFIG_KEY)
+      localStorage.removeItem(VCM_SYNC_SETTINGS_KEY)
     }
   }
 
@@ -113,19 +99,11 @@ export class VCMConfigManager {
   }
 
   static isConfigured(): boolean {
-    if (!this.isClient()) {
-      return false
-    }
-
     const config = this.getConfig()
-    return !!(config && config.baseUrl && config.apiKey)
+    return !!(config && config.baseUrl && config.apiKey && config.enabled)
   }
 
   static updateLastSync(): void {
-    if (!this.isClient()) {
-      return
-    }
-
     const config = this.getConfig()
     if (config) {
       config.lastSync = new Date().toISOString()
@@ -134,10 +112,6 @@ export class VCMConfigManager {
   }
 
   static updateIntegrationId(integrationId: string): void {
-    if (!this.isClient()) {
-      return
-    }
-
     const config = this.getConfig()
     if (config) {
       config.integrationId = integrationId
@@ -146,10 +120,6 @@ export class VCMConfigManager {
   }
 
   static getWebhookSecret(): string {
-    if (!this.isClient()) {
-      return "whisec_lf1jah5h"
-    }
-
     const config = this.getConfig()
     return config?.webhookSecret || "whisec_lf1jah5h"
   }
@@ -161,5 +131,18 @@ export class VCMConfigManager {
       result += chars.charAt(Math.floor(Math.random() * chars.length))
     }
     return result
+  }
+
+  static getUseMockData(): boolean {
+    const config = this.getConfig()
+    return config?.useMockData ?? true // デフォルトでデモモード
+  }
+
+  static setUseMockData(useMockData: boolean): void {
+    const config = this.getConfig()
+    if (config) {
+      config.useMockData = useMockData
+      this.saveConfig(config)
+    }
   }
 }

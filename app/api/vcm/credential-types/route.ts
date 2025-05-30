@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
                 description: "学生の氏名",
                 selectiveDisclosure: true,
               },
-              faculty: {
+              department: {
                 type: "string",
                 title: "学部",
                 description: "所属学部",
@@ -49,11 +49,11 @@ export async function GET(request: NextRequest) {
                 type: "string",
                 format: "date",
                 title: "入学日",
-                description: "入学した日付",
+                description: "入学年月日",
                 selectiveDisclosure: true,
               },
             },
-            required: ["studentId", "name", "faculty"],
+            required: ["studentId", "name", "department"],
             additionalProperties: false,
           },
           display: {
@@ -64,21 +64,21 @@ export async function GET(request: NextRequest) {
             textColor: "#ffffff",
           },
           issuanceConfig: {
-            validityPeriod: 365,
+            validityPeriod: 1460, // 4 years
             issuer: "https://university.example.com",
             context: ["https://www.w3.org/2018/credentials/v1"],
             type: ["VerifiableCredential", "StudentIDCredential"],
             revocable: true,
             batchIssuance: false,
           },
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: "2024-01-01T00:00:00Z",
+          updatedAt: "2024-01-01T00:00:00Z",
           status: "active" as const,
         },
         {
           id: "academic-transcript",
           name: "成績証明書",
-          description: "学術成績の証明書",
+          description: "学業成績の証明書",
           version: "1.0.0",
           schema: {
             $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
               gpa: {
                 type: "number",
                 title: "GPA",
-                description: "累積GPA",
+                description: "総合成績評価",
                 selectiveDisclosure: true,
               },
               courses: {
@@ -108,27 +108,34 @@ export async function GET(request: NextRequest) {
                 description: "履修した科目一覧",
                 selectiveDisclosure: true,
               },
+              graduationDate: {
+                type: "string",
+                format: "date",
+                title: "卒業予定日",
+                description: "卒業予定年月日",
+                selectiveDisclosure: true,
+              },
             },
-            required: ["studentId", "name", "gpa"],
+            required: ["studentId", "name"],
             additionalProperties: false,
           },
           display: {
             name: "成績証明書",
-            description: "学術成績の証明書",
+            description: "学業成績の証明書",
             locale: "ja-JP",
             backgroundColor: "#059669",
             textColor: "#ffffff",
           },
           issuanceConfig: {
-            validityPeriod: 1095, // 3 years
+            validityPeriod: 365, // 1 year
             issuer: "https://university.example.com",
             context: ["https://www.w3.org/2018/credentials/v1"],
             type: ["VerifiableCredential", "AcademicTranscriptCredential"],
             revocable: false,
             batchIssuance: true,
           },
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: "2024-01-01T00:00:00Z",
+          updatedAt: "2024-01-01T00:00:00Z",
           status: "active" as const,
         },
       ]
@@ -136,7 +143,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         credentialTypes: mockCredentialTypes,
-        count: mockCredentialTypes.length,
         mode: "demo",
       })
     }
@@ -151,76 +157,61 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Try different credential types endpoints
-    const credentialEndpoints = [
-      { path: "/api/credential-types", method: "GET" },
-      { path: "/api/v1/credential-types", method: "GET" },
-      { path: "/credential-types", method: "GET" },
-      { path: "/api/credentials/types", method: "GET" },
-    ]
+    try {
+      const credentialTypesEndpoint = `${baseUrl}/api/credential-types`
+      console.log(`Fetching credential types from: ${credentialTypesEndpoint}`)
 
-    for (const endpoint of credentialEndpoints) {
-      try {
-        const credentialTypesEndpoint = `${baseUrl}${endpoint.path}`
-        console.log(`Trying credential types endpoint: ${endpoint.method} ${credentialTypesEndpoint}`)
+      const response = await fetch(credentialTypesEndpoint, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+          Authorization: `Bearer ${apiKey}`,
+          "User-Agent": "Student-Login-Site/1.0",
+        },
+        signal: AbortSignal.timeout(10000), // 10 seconds
+      })
 
-        const response = await fetch(credentialTypesEndpoint, {
-          method: endpoint.method,
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey,
-            Authorization: `Bearer ${apiKey}`,
-            "User-Agent": "Student-Login-Site/1.0",
-          },
-          signal: AbortSignal.timeout(10000),
+      console.log(`Credential types response status: ${response.status}`)
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log("Credential types result:", result)
+
+        return NextResponse.json({
+          success: true,
+          credentialTypes: result.credentialTypes || result.data || [],
+          mode: "production",
         })
-
-        console.log(`Credential types endpoint response status: ${response.status}`)
-
-        if (response.ok) {
-          const data = await response.json()
-          console.log("Credential types data:", data)
-
-          return NextResponse.json({
-            success: true,
-            credentialTypes: data.credentialTypes || data.types || data,
-            count: (data.credentialTypes || data.types || data).length,
-            endpoint: credentialTypesEndpoint,
-            mode: "production",
-          })
-        } else if (response.status === 404) {
-          console.log(`404 for ${credentialTypesEndpoint}, trying next endpoint`)
-          continue
-        } else {
-          console.log(`Non-200 status ${response.status} for ${credentialTypesEndpoint}`)
-          continue
+      } else {
+        let errorMessage = `クレデンシャルタイプの取得に失敗しました (${response.status})`
+        try {
+          const errorData = await response.json()
+          errorMessage = `クレデンシャルタイプの取得に失敗しました (${response.status}): ${errorData.error || response.statusText}`
+        } catch (e) {
+          // If we can't parse JSON, use status text
         }
-      } catch (endpointError) {
-        console.log(`Error testing ${endpoint.method} ${endpoint.path}:`, endpointError)
-        continue
-      }
-    }
 
-    return NextResponse.json({
-      success: false,
-      message: "クレデンシャルタイプエンドポイントが見つかりません",
-      troubleshooting: [
-        "VCMサーバーが正しく起動しているか確認してください",
-        "以下のエンドポイントが利用可能か確認してください:",
-        "  - GET /api/credential-types",
-        "  - GET /api/v1/credential-types",
-        "  - GET /credential-types",
-        "  - GET /api/credentials/types",
-        "API Keyが正しく設定されているか確認してください",
-      ],
-      testedEndpoints: credentialEndpoints.map((e) => `${e.method} ${e.path}`),
-    })
+        return NextResponse.json({
+          success: false,
+          message: errorMessage,
+          statusCode: response.status,
+        })
+      }
+    } catch (fetchError) {
+      console.error("Failed to fetch credential types:", fetchError)
+      return NextResponse.json({
+        success: false,
+        message: `クレデンシャルタイプの取得でエラーが発生しました: ${fetchError instanceof Error ? fetchError.message : "不明なエラー"}`,
+        error: fetchError instanceof Error ? fetchError.name : "UnknownError",
+      })
+    }
   } catch (error) {
-    console.error("VCM credential types fetch error:", error)
+    console.error("Credential types API error:", error)
     return NextResponse.json(
       {
         success: false,
-        message: `クレデンシャルタイプの取得でエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
+        message: `APIエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
       },
       { status: 500 },
     )

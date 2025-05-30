@@ -24,7 +24,6 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "deprecated">("all")
-  const [useMockData, setUseMockData] = useState(true) // デフォルトでデモモードを有効に
 
   const loadCredentialTypes = async () => {
     const config = VCMConfigManager.getConfig()
@@ -33,10 +32,9 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
       return
     }
 
-    // Enable the config for demo mode
-    if (useMockData && !config.enabled) {
-      config.enabled = true
-      VCMConfigManager.saveConfig(config)
+    if (!config.enabled) {
+      setError("VCM連携が有効になっていません。管理画面で連携を有効にしてください。")
+      return
     }
 
     setIsLoading(true)
@@ -44,7 +42,7 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
 
     try {
       // Use browser client that calls API routes
-      const client = new VCMBrowserClient(config, useMockData)
+      const client = new VCMBrowserClient(config, config.useMockData ?? true)
       const types = await client.getCredentialTypes()
       setCredentialTypes(types)
       setFilteredTypes(types)
@@ -57,7 +55,7 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
 
   useEffect(() => {
     loadCredentialTypes()
-  }, [useMockData])
+  }, [])
 
   useEffect(() => {
     let filtered = credentialTypes
@@ -71,9 +69,9 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
     if (searchTerm) {
       filtered = filtered.filter(
         (type) =>
-          type.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          type.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          type.id.toLowerCase().includes(searchTerm.toLowerCase()),
+          (type.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (type.description || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (type.id || "").toLowerCase().includes(searchTerm.toLowerCase()),
       )
     }
 
@@ -112,7 +110,59 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("ja-JP")
+    if (!dateString) return "不明"
+    try {
+      return new Date(dateString).toLocaleDateString("ja-JP")
+    } catch {
+      return "不明"
+    }
+  }
+
+  const config = VCMConfigManager.getConfig()
+  const isConfigured = VCMConfigManager.isConfigured()
+
+  const getDisplayName = (type: VCMCredentialType) => {
+    return type.display?.name || type.name || type.id || "名前なし"
+  }
+
+  const getBackgroundColor = (type: VCMCredentialType) => {
+    return type.display?.backgroundColor || "#3b82f6"
+  }
+
+  const getTextColor = (type: VCMCredentialType) => {
+    return type.display?.textColor || "#ffffff"
+  }
+
+  const getCredentialTypes = (type: VCMCredentialType) => {
+    return type.issuanceConfig?.type || []
+  }
+
+  const getValidityPeriod = (type: VCMCredentialType) => {
+    return type.issuanceConfig?.validityPeriod || "不明"
+  }
+
+  const getIssuer = (type: VCMCredentialType) => {
+    return type.issuanceConfig?.issuer || "不明"
+  }
+
+  const getRevocable = (type: VCMCredentialType) => {
+    return type.issuanceConfig?.revocable ?? false
+  }
+
+  const getBatchIssuance = (type: VCMCredentialType) => {
+    return type.issuanceConfig?.batchIssuance ?? false
+  }
+
+  const getContext = (type: VCMCredentialType) => {
+    return type.issuanceConfig?.context || []
+  }
+
+  const getSchemaProperties = (type: VCMCredentialType) => {
+    return type.schema?.properties || {}
+  }
+
+  const getRequiredFields = (type: VCMCredentialType) => {
+    return type.schema?.required || []
   }
 
   return (
@@ -130,19 +180,7 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
               </CardDescription>
             </div>
             <div className="flex space-x-2">
-              <div className="flex items-center space-x-2">
-                <Label htmlFor="use-mock-data" className="text-sm">
-                  デモモード
-                </Label>
-                <input
-                  id="use-mock-data"
-                  type="checkbox"
-                  checked={useMockData}
-                  onChange={(e) => setUseMockData(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-              </div>
-              <Button onClick={loadCredentialTypes} disabled={isLoading} variant="outline">
+              <Button onClick={loadCredentialTypes} disabled={isLoading || !isConfigured} variant="outline">
                 {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 更新
               </Button>
@@ -151,7 +189,14 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {useMockData && (
+            {!isConfigured && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>VCM連携が設定されていません。管理画面でVCM連携を設定してください。</AlertDescription>
+              </Alert>
+            )}
+
+            {config?.useMockData && isConfigured && (
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
@@ -160,257 +205,282 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
               </Alert>
             )}
 
-            {/* Search and Filter */}
-            <div className="flex space-x-4">
-              <div className="flex-1">
-                <Label htmlFor="search">検索</Label>
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                  <Input
-                    id="search"
-                    placeholder="名前、説明、IDで検索..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label htmlFor="status-filter">ステータス</Label>
-                <select
-                  id="status-filter"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as any)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
-                >
-                  <option value="all">すべて</option>
-                  <option value="active">アクティブ</option>
-                  <option value="draft">ドラフト</option>
-                  <option value="deprecated">非推奨</option>
-                </select>
-              </div>
-            </div>
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {/* Credential Types List */}
-            <div className="grid gap-4">
-              {filteredTypes.map((type) => (
-                <Card
-                  key={type.id}
-                  className={`cursor-pointer transition-all hover:bg-gray-50 ${
-                    selectedType?.id === type.id ? "ring-2 ring-blue-500 bg-blue-50" : ""
-                  }`}
-                  onClick={() => handleTypeSelect(type)}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div
-                          className="p-2 rounded-md text-white"
-                          style={{ backgroundColor: type.display.backgroundColor }}
-                        >
-                          <FileText className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-base">{type.display.name}</CardTitle>
-                          <CardDescription className="text-sm">{type.description}</CardDescription>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end space-y-1">
-                        <Badge className={`text-xs ${getStatusColor(type.status)}`}>
-                          {getStatusIcon(type.status)}
-                          <span className="ml-1">
-                            {type.status === "active" && "アクティブ"}
-                            {type.status === "draft" && "ドラフト"}
-                            {type.status === "deprecated" && "非推奨"}
-                          </span>
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          v{type.version}
-                        </Badge>
-                      </div>
+            {isConfigured && (
+              <>
+                {/* Search and Filter */}
+                <div className="flex space-x-4">
+                  <div className="flex-1">
+                    <Label htmlFor="search">検索</Label>
+                    <div className="relative">
+                      <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                      <Input
+                        id="search"
+                        placeholder="名前、説明、IDで検索..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-8"
+                      />
                     </div>
-                  </CardHeader>
+                  </div>
+                  <div>
+                    <Label htmlFor="status-filter">ステータス</Label>
+                    <select
+                      id="status-filter"
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as any)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                    >
+                      <option value="all">すべて</option>
+                      <option value="active">アクティブ</option>
+                      <option value="draft">ドラフト</option>
+                      <option value="deprecated">非推奨</option>
+                    </select>
+                  </div>
+                </div>
 
-                  {selectedType?.id === type.id && (
-                    <CardContent className="pt-0">
-                      <Tabs defaultValue="overview" className="w-full">
-                        <TabsList className="grid w-full grid-cols-3">
-                          <TabsTrigger value="overview">概要</TabsTrigger>
-                          <TabsTrigger value="schema">スキーマ</TabsTrigger>
-                          <TabsTrigger value="config">設定</TabsTrigger>
-                        </TabsList>
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
 
-                        <TabsContent value="overview" className="mt-4 space-y-3">
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <Label className="text-xs text-gray-500">ID</Label>
-                              <div className="font-mono">{type.id}</div>
+                {/* Credential Types List */}
+                <div className="grid gap-4">
+                  {filteredTypes.map((type) => (
+                    <Card
+                      key={type.id}
+                      className={`cursor-pointer transition-all hover:bg-gray-50 ${
+                        selectedType?.id === type.id ? "ring-2 ring-blue-500 bg-blue-50" : ""
+                      }`}
+                      onClick={() => handleTypeSelect(type)}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <div
+                              className="p-2 rounded-md text-white"
+                              style={{ backgroundColor: getBackgroundColor(type) }}
+                            >
+                              <FileText className="h-4 w-4" />
                             </div>
                             <div>
-                              <Label className="text-xs text-gray-500">バージョン</Label>
-                              <div>{type.version}</div>
-                            </div>
-                            <div>
-                              <Label className="text-xs text-gray-500">作成日</Label>
-                              <div>{formatDate(type.createdAt)}</div>
-                            </div>
-                            <div>
-                              <Label className="text-xs text-gray-500">更新日</Label>
-                              <div>{formatDate(type.updatedAt)}</div>
+                              <CardTitle className="text-base">{getDisplayName(type)}</CardTitle>
+                              <CardDescription className="text-sm">{type.description || "説明なし"}</CardDescription>
                             </div>
                           </div>
-
-                          <div>
-                            <Label className="text-xs text-gray-500">説明</Label>
-                            <div className="text-sm">{type.description}</div>
+                          <div className="flex flex-col items-end space-y-1">
+                            <Badge className={`text-xs ${getStatusColor(type.status || "unknown")}`}>
+                              {getStatusIcon(type.status || "unknown")}
+                              <span className="ml-1">
+                                {type.status === "active" && "アクティブ"}
+                                {type.status === "draft" && "ドラフト"}
+                                {type.status === "deprecated" && "非推奨"}
+                                {!type.status && "不明"}
+                              </span>
+                            </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              v{type.version || "1.0"}
+                            </Badge>
                           </div>
+                        </div>
+                      </CardHeader>
 
-                          <div>
-                            <Label className="text-xs text-gray-500">クレデンシャルタイプ</Label>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {type.issuanceConfig.type.map((t, index) => (
-                                <Badge key={index} variant="outline" className="text-xs">
-                                  {t}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        </TabsContent>
+                      {selectedType?.id === type.id && (
+                        <CardContent className="pt-0">
+                          <Tabs defaultValue="overview" className="w-full">
+                            <TabsList className="grid w-full grid-cols-3">
+                              <TabsTrigger value="overview">概要</TabsTrigger>
+                              <TabsTrigger value="schema">スキーマ</TabsTrigger>
+                              <TabsTrigger value="config">設定</TabsTrigger>
+                            </TabsList>
 
-                        <TabsContent value="schema" className="mt-4">
-                          <div className="space-y-3">
-                            <div>
-                              <Label className="text-sm font-medium">プロパティ</Label>
-                              <div className="mt-2 space-y-2">
-                                {Object.entries(type.schema.properties).map(([key, property]) => (
-                                  <div key={key} className="border rounded-md p-3 bg-gray-50">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="font-medium text-sm">{property.title}</div>
-                                      <div className="flex space-x-1">
-                                        <Badge variant="outline" className="text-xs">
-                                          {property.type}
-                                        </Badge>
-                                        {type.schema.required.includes(key) && (
-                                          <Badge variant="destructive" className="text-xs">
-                                            必須
-                                          </Badge>
-                                        )}
-                                        {property.selectiveDisclosure && (
-                                          <Badge variant="secondary" className="text-xs">
-                                            選択的開示
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="text-xs text-gray-600">{property.description}</div>
-                                    {property.enum && (
-                                      <div className="mt-2">
-                                        <Label className="text-xs text-gray-500">選択肢:</Label>
-                                        <div className="flex flex-wrap gap-1 mt-1">
-                                          {property.enum.map((value, index) => (
-                                            <Badge key={index} variant="outline" className="text-xs">
-                                              {value}
-                                            </Badge>
-                                          ))}
+                            <TabsContent value="overview" className="mt-4 space-y-3">
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <Label className="text-xs text-gray-500">ID</Label>
+                                  <div className="font-mono">{type.id || "不明"}</div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs text-gray-500">バージョン</Label>
+                                  <div>{type.version || "1.0"}</div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs text-gray-500">作成日</Label>
+                                  <div>{formatDate(type.createdAt)}</div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs text-gray-500">更新日</Label>
+                                  <div>{formatDate(type.updatedAt)}</div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <Label className="text-xs text-gray-500">説明</Label>
+                                <div className="text-sm">{type.description || "説明なし"}</div>
+                              </div>
+
+                              <div>
+                                <Label className="text-xs text-gray-500">クレデンシャルタイプ</Label>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {getCredentialTypes(type).length > 0 ? (
+                                    getCredentialTypes(type).map((t, index) => (
+                                      <Badge key={index} variant="outline" className="text-xs">
+                                        {t}
+                                      </Badge>
+                                    ))
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs">
+                                      未設定
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </TabsContent>
+
+                            <TabsContent value="schema" className="mt-4">
+                              <div className="space-y-3">
+                                <div>
+                                  <Label className="text-sm font-medium">プロパティ</Label>
+                                  <div className="mt-2 space-y-2">
+                                    {Object.keys(getSchemaProperties(type)).length > 0 ? (
+                                      Object.entries(getSchemaProperties(type)).map(([key, property]) => (
+                                        <div key={key} className="border rounded-md p-3 bg-gray-50">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <div className="font-medium text-sm">{property.title || key}</div>
+                                            <div className="flex space-x-1">
+                                              <Badge variant="outline" className="text-xs">
+                                                {property.type || "unknown"}
+                                              </Badge>
+                                              {getRequiredFields(type).includes(key) && (
+                                                <Badge variant="destructive" className="text-xs">
+                                                  必須
+                                                </Badge>
+                                              )}
+                                              {property.selectiveDisclosure && (
+                                                <Badge variant="secondary" className="text-xs">
+                                                  選択的開示
+                                                </Badge>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div className="text-xs text-gray-600">
+                                            {property.description || "説明なし"}
+                                          </div>
+                                          {property.enum && (
+                                            <div className="mt-2">
+                                              <Label className="text-xs text-gray-500">選択肢:</Label>
+                                              <div className="flex flex-wrap gap-1 mt-1">
+                                                {property.enum.map((value, index) => (
+                                                  <Badge key={index} variant="outline" className="text-xs">
+                                                    {value}
+                                                  </Badge>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
                                         </div>
+                                      ))
+                                    ) : (
+                                      <div className="text-center py-4 text-gray-500">
+                                        スキーマプロパティが定義されていません
                                       </div>
                                     )}
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        </TabsContent>
-
-                        <TabsContent value="config" className="mt-4">
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4 text-sm">
-                              <div>
-                                <Label className="text-xs text-gray-500">有効期限</Label>
-                                <div>{type.issuanceConfig.validityPeriod}日</div>
-                              </div>
-                              <div>
-                                <Label className="text-xs text-gray-500">発行者</Label>
-                                <div className="font-mono text-xs">{type.issuanceConfig.issuer}</div>
-                              </div>
-                              <div>
-                                <Label className="text-xs text-gray-500">取り消し可能</Label>
-                                <div>{type.issuanceConfig.revocable ? "はい" : "いいえ"}</div>
-                              </div>
-                              <div>
-                                <Label className="text-xs text-gray-500">バッチ発行</Label>
-                                <div>{type.issuanceConfig.batchIssuance ? "はい" : "いいえ"}</div>
-                              </div>
-                            </div>
-
-                            <div>
-                              <Label className="text-xs text-gray-500">コンテキスト</Label>
-                              <div className="mt-1 space-y-1">
-                                {type.issuanceConfig.context.map((context, index) => (
-                                  <div key={index} className="text-xs font-mono bg-gray-100 p-2 rounded">
-                                    {context}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div>
-                              <Label className="text-xs text-gray-500">表示設定</Label>
-                              <div className="mt-2 p-3 border rounded-md">
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                  <div>
-                                    <Label className="text-xs text-gray-500">背景色</Label>
-                                    <div className="flex items-center space-x-2">
-                                      <div
-                                        className="w-4 h-4 rounded border"
-                                        style={{ backgroundColor: type.display.backgroundColor }}
-                                      />
-                                      <span className="font-mono">{type.display.backgroundColor}</span>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs text-gray-500">文字色</Label>
-                                    <div className="flex items-center space-x-2">
-                                      <div
-                                        className="w-4 h-4 rounded border"
-                                        style={{ backgroundColor: type.display.textColor }}
-                                      />
-                                      <span className="font-mono">{type.display.textColor}</span>
-                                    </div>
-                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          </div>
-                        </TabsContent>
-                      </Tabs>
-                    </CardContent>
+                            </TabsContent>
+
+                            <TabsContent value="config" className="mt-4">
+                              <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                  <div>
+                                    <Label className="text-xs text-gray-500">有効期限</Label>
+                                    <div>{getValidityPeriod(type)}日</div>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-500">発行者</Label>
+                                    <div className="font-mono text-xs">{getIssuer(type)}</div>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-500">取り消し可能</Label>
+                                    <div>{getRevocable(type) ? "はい" : "いいえ"}</div>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-500">バッチ発行</Label>
+                                    <div>{getBatchIssuance(type) ? "はい" : "いいえ"}</div>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <Label className="text-xs text-gray-500">コンテキスト</Label>
+                                  <div className="mt-1 space-y-1">
+                                    {getContext(type).length > 0 ? (
+                                      getContext(type).map((context, index) => (
+                                        <div key={index} className="text-xs font-mono bg-gray-100 p-2 rounded">
+                                          {context}
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <div className="text-xs text-gray-500 p-2">コンテキストが設定されていません</div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {type.display && (
+                                  <div>
+                                    <Label className="text-xs text-gray-500">表示設定</Label>
+                                    <div className="mt-2 p-3 border rounded-md">
+                                      <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div>
+                                          <Label className="text-xs text-gray-500">背景色</Label>
+                                          <div className="flex items-center space-x-2">
+                                            <div
+                                              className="w-4 h-4 rounded border"
+                                              style={{ backgroundColor: getBackgroundColor(type) }}
+                                            />
+                                            <span className="font-mono">{getBackgroundColor(type)}</span>
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs text-gray-500">文字色</Label>
+                                          <div className="flex items-center space-x-2">
+                                            <div
+                                              className="w-4 h-4 rounded border"
+                                              style={{ backgroundColor: getTextColor(type) }}
+                                            />
+                                            <span className="font-mono">{getTextColor(type)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </TabsContent>
+                          </Tabs>
+                        </CardContent>
+                      )}
+                    </Card>
+                  ))}
+
+                  {filteredTypes.length === 0 && !isLoading && isConfigured && (
+                    <div className="text-center py-8 text-gray-500">
+                      {searchTerm || statusFilter !== "all"
+                        ? "検索条件に一致するクレデンシャルタイプが見つかりません"
+                        : "クレデンシャルタイプが見つかりません"}
+                    </div>
                   )}
-                </Card>
-              ))}
 
-              {filteredTypes.length === 0 && !isLoading && (
-                <div className="text-center py-8 text-gray-500">
-                  {searchTerm || statusFilter !== "all"
-                    ? "検索条件に一致するクレデンシャルタイプが見つかりません"
-                    : "クレデンシャルタイプが見つかりません"}
+                  {isLoading && (
+                    <div className="text-center py-8">
+                      <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-500" />
+                      <p className="text-gray-500">クレデンシャルタイプを読み込み中...</p>
+                    </div>
+                  )}
                 </div>
-              )}
-
-              {isLoading && (
-                <div className="text-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-500" />
-                  <p className="text-gray-500">クレデンシャルタイプを読み込み中...</p>
-                </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>

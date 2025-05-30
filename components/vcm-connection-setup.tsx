@@ -38,6 +38,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     enabled: false,
     autoSync: false,
     syncInterval: 60,
+    useMockData: true,
   })
 
   const [syncSettings, setSyncSettings] = useState<VCMSyncSettings>({
@@ -55,7 +56,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   const [connectionDetails, setConnectionDetails] = useState<any>(null)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<any>(null)
-  const [useMockData, setUseMockData] = useState(true) // デフォルトでデモモードを有効に
   const [integrationStatus, setIntegrationStatus] = useState<any>(null)
   const [isRegisteringIntegration, setIsRegisteringIntegration] = useState(false)
 
@@ -85,6 +85,20 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     VCMConfigManager.saveSyncSettings(newSettings)
   }
 
+  const handleUseMockDataChange = (useMockData: boolean) => {
+    const newConfig = { ...config, useMockData }
+    setConfig(newConfig)
+    VCMConfigManager.saveConfig(newConfig)
+
+    // デモモードを有効にした場合、連携も自動的に有効にする
+    if (useMockData && !newConfig.enabled) {
+      const enabledConfig = { ...newConfig, enabled: true }
+      setConfig(enabledConfig)
+      VCMConfigManager.saveConfig(enabledConfig)
+      onConfigChange?.(true)
+    }
+  }
+
   const testConnection = async () => {
     setIsTestingConnection(true)
     setConnectionStatus("unknown")
@@ -92,7 +106,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setConnectionDetails(null)
 
     try {
-      const client = new VCMBrowserClient(config, useMockData)
+      const client = new VCMBrowserClient(config, config.useMockData ?? true)
       const result = await client.testConnection()
 
       if (result.success) {
@@ -100,7 +114,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
         setConnectionDetails(result)
 
         // For demo mode, set mock integration status
-        if (useMockData) {
+        if (config.useMockData) {
           setIntegrationStatus({
             status: "active",
             lastSync: new Date().toISOString(),
@@ -124,7 +138,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setIsRegisteringIntegration(true)
 
     try {
-      const client = new VCMBrowserClient(config, useMockData)
+      const client = new VCMBrowserClient(config, config.useMockData ?? true)
       const integration = await client.registerIntegration({
         name: "Student Login Site",
         url: window.location.origin,
@@ -147,6 +161,12 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
 
   const syncCredentialTypes = async () => {
     if (!config.enabled) {
+      setSyncResult({
+        success: false,
+        synced: 0,
+        errors: ["VCM連携が有効になっていません。まず連携を有効にしてください。"],
+        lastSync: new Date().toISOString(),
+      })
       return
     }
 
@@ -154,13 +174,15 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setSyncResult(null)
 
     try {
-      const client = new VCMBrowserClient(config, useMockData)
+      const client = new VCMBrowserClient(config, config.useMockData ?? true)
       const result = await client.syncCredentialTypes()
       setSyncResult(result)
 
       if (result.success) {
         VCMConfigManager.updateLastSync()
-        setConfig((prev) => ({ ...prev, lastSync: new Date().toISOString() }))
+        const updatedConfig = { ...config, lastSync: new Date().toISOString() }
+        setConfig(updatedConfig)
+        VCMConfigManager.saveConfig(updatedConfig)
       }
     } catch (error) {
       setSyncResult({
@@ -176,14 +198,16 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
 
   const clearConfiguration = () => {
     VCMConfigManager.clearConfig()
-    setConfig({
+    const defaultConfig = {
       baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
       apiKey: "sl_b05t7b1r1nb",
       organizationId: "",
       enabled: false,
       autoSync: false,
       syncInterval: 60,
-    })
+      useMockData: true,
+    }
+    setConfig(defaultConfig)
     setConnectionStatus("unknown")
     setConnectionError(null)
     setConnectionDetails(null)
@@ -230,7 +254,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   <Label className="text-base">デモモード</Label>
                   <div className="text-sm text-gray-500">実際のVCMの代わりにモックデータを使用</div>
                 </div>
-                <Switch checked={useMockData} onCheckedChange={setUseMockData} />
+                <Switch checked={config.useMockData ?? true} onCheckedChange={handleUseMockDataChange} />
               </div>
 
               <Separator />
@@ -243,9 +267,9 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                     placeholder="https://v0-verifiable-credential-manager.vercel.app"
                     value={config.baseUrl}
                     onChange={(e) => handleConfigChange("baseUrl", e.target.value)}
-                    disabled={useMockData}
+                    disabled={config.useMockData}
                   />
-                  {!useMockData && (
+                  {!config.useMockData && (
                     <div className="text-xs text-gray-500">
                       例: https://vcm-api.example.com または http://localhost:3001
                     </div>
@@ -259,7 +283,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                     placeholder="sl_b05t7b1r1nb"
                     value={config.apiKey}
                     onChange={(e) => handleConfigChange("apiKey", e.target.value)}
-                    disabled={useMockData}
+                    disabled={config.useMockData}
                   />
                   <div className="text-xs text-gray-500">
                     VCMの統合設定画面で表示されているAPI Keyを入力してください
@@ -281,7 +305,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
               <div className="flex space-x-2">
                 <Button
                   onClick={testConnection}
-                  disabled={isTestingConnection || (!useMockData && (!config.baseUrl || !config.apiKey))}
+                  disabled={isTestingConnection || (!config.useMockData && (!config.baseUrl || !config.apiKey))}
                   variant="outline"
                 >
                   {isTestingConnection ? (
@@ -309,25 +333,42 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                     <div className="space-y-3">
                       <p>{connectionStatus === "success" ? "VCMとの接続が正常に確立されました。" : connectionError}</p>
 
-                      {connectionDetails && connectionDetails.statusCode && (
-                        <div className="text-sm bg-gray-100 p-3 rounded">
+                      {connectionDetails && connectionDetails.healthData && (
+                        <div className="mt-3 text-sm bg-gray-50 p-3 rounded">
                           <p>
-                            <strong>ステータスコード:</strong> {connectionDetails.statusCode}
+                            <strong>VCMサービス:</strong> {connectionDetails.healthData.service}
                           </p>
-                          {connectionDetails.endpoint && (
+                          <p>
+                            <strong>バージョン:</strong> {connectionDetails.healthData.version}
+                          </p>
+                          <p>
+                            <strong>ステータス:</strong> {connectionDetails.healthData.status}
+                          </p>
+                          {connectionDetails.healthData.authentication && (
                             <p>
-                              <strong>エンドポイント:</strong> {connectionDetails.endpoint}
+                              <strong>認証:</strong>{" "}
+                              {connectionDetails.healthData.authentication.required ? "必要" : "不要"}(
+                              {connectionDetails.healthData.authentication.status})
                             </p>
                           )}
-                          {connectionDetails.error && (
+                          {connectionDetails.method && (
                             <p>
-                              <strong>エラータイプ:</strong> {connectionDetails.error}
+                              <strong>接続方法:</strong> {connectionDetails.method} {connectionDetails.endpoint}
                             </p>
                           )}
-                          {connectionDetails.mode && (
-                            <p>
-                              <strong>モード:</strong> {connectionDetails.mode === "demo" ? "デモ" : "本番"}
-                            </p>
+                          {connectionDetails.healthData.features && (
+                            <div className="mt-2">
+                              <p>
+                                <strong>利用可能な機能:</strong>
+                              </p>
+                              <ul className="list-disc list-inside ml-4">
+                                {Object.entries(connectionDetails.healthData.features).map(([feature, enabled]) => (
+                                  <li key={feature} className={enabled ? "text-green-600" : "text-red-600"}>
+                                    {feature}: {enabled ? "有効" : "無効"}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
                           )}
                         </div>
                       )}
@@ -343,29 +384,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                         </div>
                       )}
 
-                      {connectionDetails && connectionDetails.suggestedActions && (
-                        <div className="mt-3">
-                          <p className="text-sm font-medium mb-2">推奨アクション:</p>
-                          <div className="flex flex-wrap gap-2">
-                            {connectionDetails.suggestedActions.map((action: string, index: number) => (
-                              <Button
-                                key={index}
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  if (action.includes("デモモード")) {
-                                    setUseMockData(true)
-                                  }
-                                }}
-                              >
-                                {action}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {connectionStatus === "error" && !useMockData && (
+                      {connectionStatus === "error" && !config.useMockData && (
                         <div className="mt-3 p-3 bg-blue-50 rounded">
                           <p className="text-sm text-blue-800 mb-2">
                             <strong>推奨:</strong>{" "}
@@ -374,7 +393,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setUseMockData(true)}
+                            onClick={() => handleUseMockDataChange(true)}
                             className="text-blue-700 border-blue-300 hover:bg-blue-100"
                           >
                             デモモードに切り替える
@@ -388,7 +407,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
             </div>
           </TabsContent>
 
-          {/* Rest of the tabs remain the same */}
           <TabsContent value="integration" className="space-y-4">
             <div className="space-y-4">
               <div className="bg-blue-50 p-4 rounded-md">
@@ -537,6 +555,16 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                 今すぐ同期
               </Button>
 
+              {!config.enabled && (
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>連携が無効です</AlertTitle>
+                  <AlertDescription>
+                    同期を実行するには、まず「接続設定」タブでVCM連携を有効にしてください。
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {syncResult && (
                 <Alert variant={syncResult.success ? "default" : "destructive"}>
                   {syncResult.success ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
@@ -619,7 +647,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                 </div>
               )}
 
-              {useMockData && (
+              {config.useMockData && (
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
                   <AlertTitle>デモモード</AlertTitle>
