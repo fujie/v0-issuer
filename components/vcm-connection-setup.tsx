@@ -20,9 +20,10 @@ import {
   AlertTriangle,
   Link,
   Database,
+  Webhook,
 } from "lucide-react"
 import { VCMConfigManager, type VCMConnectionConfig, type VCMSyncSettings } from "@/lib/vcm-config"
-import { VCMClient, MockVCMClient, type VCMSyncResult } from "@/lib/vcm-client"
+import { VCMBrowserClient } from "@/lib/vcm-client-browser"
 
 interface VCMConnectionSetupProps {
   onConfigChange?: (isConfigured: boolean) => void
@@ -30,8 +31,8 @@ interface VCMConnectionSetupProps {
 
 export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) {
   const [config, setConfig] = useState<VCMConnectionConfig>({
-    baseUrl: "",
-    apiKey: "",
+    baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
+    apiKey: "sl_b05t7b1r1nb",
     organizationId: "",
     enabled: false,
     autoSync: false,
@@ -49,8 +50,10 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   const [connectionStatus, setConnectionStatus] = useState<"unknown" | "success" | "error">("unknown")
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState<VCMSyncResult | null>(null)
+  const [syncResult, setSyncResult] = useState<any>(null)
   const [useMockData, setUseMockData] = useState(false)
+  const [integrationStatus, setIntegrationStatus] = useState<any>(null)
+  const [isRegisteringIntegration, setIsRegisteringIntegration] = useState(false)
 
   useEffect(() => {
     // Load saved configuration
@@ -84,21 +87,53 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setConnectionError(null)
 
     try {
-      const client = useMockData ? new MockVCMClient(config) : new VCMClient(config)
+      const client = new VCMBrowserClient(config, useMockData)
+      const result = await client.testConnection()
 
-      const isConnected = await client.testConnection()
-
-      if (isConnected) {
+      if (result.success) {
         setConnectionStatus("success")
+        // For demo mode, set mock integration status
+        if (useMockData) {
+          setIntegrationStatus({
+            status: "active",
+            lastSync: new Date().toISOString(),
+            webhookUrl: `${window.location.origin}/api/webhooks/vcm`,
+          })
+        }
       } else {
         setConnectionStatus("error")
-        setConnectionError("接続に失敗しました。設定を確認してください。")
+        setConnectionError(result.message || "接続に失敗しました")
       }
     } catch (error) {
       setConnectionStatus("error")
       setConnectionError(error instanceof Error ? error.message : "不明なエラーが発生しました")
     } finally {
       setIsTestingConnection(false)
+    }
+  }
+
+  const registerIntegration = async () => {
+    setIsRegisteringIntegration(true)
+
+    try {
+      const client = new VCMBrowserClient(config, useMockData)
+      const integration = await client.registerIntegration({
+        name: "Student Login Site",
+        url: window.location.origin,
+        webhookSecret: "whisec_lf1jah5h",
+        autoSync: true,
+      })
+
+      setIntegrationStatus({
+        status: integration.status,
+        lastSync: integration.lastSync,
+        webhookUrl: `${window.location.origin}/api/webhooks/vcm`,
+      })
+    } catch (error) {
+      console.error("Integration registration failed:", error)
+      setConnectionError(error instanceof Error ? error.message : "統合の登録に失敗しました")
+    } finally {
+      setIsRegisteringIntegration(false)
     }
   }
 
@@ -111,8 +146,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setSyncResult(null)
 
     try {
-      const client = useMockData ? new MockVCMClient(config) : new VCMClient(config)
-
+      const client = new VCMBrowserClient(config, useMockData)
       const result = await client.syncCredentialTypes()
       setSyncResult(result)
 
@@ -135,8 +169,8 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   const clearConfiguration = () => {
     VCMConfigManager.clearConfig()
     setConfig({
-      baseUrl: "",
-      apiKey: "",
+      baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
+      apiKey: "sl_b05t7b1r1nb",
       organizationId: "",
       enabled: false,
       autoSync: false,
@@ -145,6 +179,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setConnectionStatus("unknown")
     setConnectionError(null)
     setSyncResult(null)
+    setIntegrationStatus(null)
     onConfigChange?.(false)
   }
 
@@ -164,8 +199,9 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="connection" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="connection">接続設定</TabsTrigger>
+            <TabsTrigger value="integration">統合設定</TabsTrigger>
             <TabsTrigger value="sync">同期設定</TabsTrigger>
             <TabsTrigger value="status">ステータス</TabsTrigger>
           </TabsList>
@@ -187,7 +223,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   <Label htmlFor="baseUrl">VCM Base URL</Label>
                   <Input
                     id="baseUrl"
-                    placeholder="https://vcm.example.com"
+                    placeholder="https://v0-verifiable-credential-manager.vercel.app"
                     value={config.baseUrl}
                     onChange={(e) => handleConfigChange("baseUrl", e.target.value)}
                     disabled={useMockData}
@@ -198,23 +234,14 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   <Label htmlFor="apiKey">API Key</Label>
                   <Input
                     id="apiKey"
-                    type="password"
-                    placeholder="your-api-key"
+                    placeholder="sl_b05t7b1r1nb"
                     value={config.apiKey}
                     onChange={(e) => handleConfigChange("apiKey", e.target.value)}
                     disabled={useMockData}
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="organizationId">Organization ID</Label>
-                  <Input
-                    id="organizationId"
-                    placeholder="org-12345"
-                    value={config.organizationId}
-                    onChange={(e) => handleConfigChange("organizationId", e.target.value)}
-                    disabled={useMockData}
-                  />
+                  <div className="text-xs text-gray-500">
+                    VCMの統合設定画面で表示されているAPI Keyを入力してください
+                  </div>
                 </div>
               </div>
 
@@ -261,6 +288,72 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   </AlertDescription>
                 </Alert>
               )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="integration" className="space-y-4">
+            <div className="space-y-4">
+              <div className="bg-blue-50 p-4 rounded-md">
+                <h4 className="text-sm font-medium text-blue-800 mb-2">統合設定について</h4>
+                <p className="text-sm text-blue-700">
+                  VCMシステムとの統合を登録することで、自動的にクレデンシャルタイプの同期やWebhook通知を受け取ることができます。
+                </p>
+              </div>
+
+              {integrationStatus && (
+                <div className="border rounded-md p-4">
+                  <h4 className="text-sm font-medium mb-3">現在の統合ステータス</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <Label className="text-xs text-gray-500">ステータス</Label>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant={integrationStatus.status === "active" ? "default" : "secondary"}>
+                          {integrationStatus.status === "active" ? "アクティブ" : "非アクティブ"}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-500">最終同期</Label>
+                      <div>{formatLastSync(integrationStatus.lastSync)}</div>
+                    </div>
+                    {integrationStatus.webhookUrl && (
+                      <div className="col-span-2">
+                        <Label className="text-xs text-gray-500">Webhook URL</Label>
+                        <div className="text-xs font-mono bg-gray-100 p-2 rounded">{integrationStatus.webhookUrl}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <h4 className="text-sm font-medium mb-2">統合情報</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <Label className="text-xs text-gray-500">Student Login Site URL</Label>
+                      <div className="font-mono text-xs">{window.location.origin}</div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-500">Webhook Secret</Label>
+                      <div className="font-mono text-xs">whisec_lf1jah5h</div>
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={registerIntegration}
+                  disabled={isRegisteringIntegration || !config.enabled}
+                  className="w-full"
+                >
+                  {isRegisteringIntegration ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Webhook className="h-4 w-4 mr-2" />
+                  )}
+                  統合を登録
+                </Button>
+              </div>
             </div>
           </TabsContent>
 
@@ -410,6 +503,21 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   {VCMConfigManager.isConfigured() ? "設定完了" : "設定不完全"}
                 </Badge>
               </div>
+
+              {integrationStatus && (
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <Webhook className="h-5 w-5 text-gray-500" />
+                    <div>
+                      <div className="font-medium">統合ステータス</div>
+                      <div className="text-sm text-gray-500">VCMとの統合状態</div>
+                    </div>
+                  </div>
+                  <Badge variant={integrationStatus.status === "active" ? "default" : "secondary"}>
+                    {integrationStatus.status === "active" ? "アクティブ" : "非アクティブ"}
+                  </Badge>
+                </div>
+              )}
 
               {useMockData && (
                 <Alert>

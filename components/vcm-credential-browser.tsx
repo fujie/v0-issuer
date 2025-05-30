@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Search, RefreshCw, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
-import { MockVCMClient, type VCMCredentialType } from "@/lib/vcm-client"
+import { VCMBrowserClient, type VCMCredentialType } from "@/lib/vcm-client-browser"
 import { VCMConfigManager } from "@/lib/vcm-config"
 
 interface VCMCredentialBrowserProps {
@@ -36,8 +36,8 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
     setError(null)
 
     try {
-      // Use mock client for demo
-      const client = new MockVCMClient(config)
+      // Use browser client that calls API routes
+      const client = new VCMBrowserClient(config, true) // Use mock data for demo
       const types = await client.getCredentialTypes()
       setCredentialTypes(types)
       setFilteredTypes(types)

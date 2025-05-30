@@ -1,12 +1,14 @@
-// VCM Configuration Management
+// Updated VCM Configuration Management
 export interface VCMConnectionConfig {
   baseUrl: string
   apiKey: string
-  organizationId?: string // 任意に変更
+  organizationId?: string
   enabled: boolean
   autoSync: boolean
   syncInterval: number // minutes
   lastSync?: string
+  webhookSecret?: string
+  integrationId?: string
 }
 
 export interface VCMSyncSettings {
@@ -14,6 +16,8 @@ export interface VCMSyncSettings {
   overwriteLocal: boolean
   syncOnStartup: boolean
   notifyOnSync: boolean
+  batchSize: number
+  retryAttempts: number
 }
 
 const VCM_CONFIG_KEY = "vcm_connection_config"
@@ -27,7 +31,15 @@ export class VCMConfigManager {
 
     try {
       const stored = localStorage.getItem(VCM_CONFIG_KEY)
-      return stored ? JSON.parse(stored) : null
+      if (stored) {
+        const config = JSON.parse(stored)
+        // Ensure default values for new fields
+        return {
+          webhookSecret: "whisec_lf1jah5h",
+          ...config,
+        }
+      }
+      return null
     } catch {
       return null
     }
@@ -46,7 +58,15 @@ export class VCMConfigManager {
 
     try {
       const stored = localStorage.getItem(VCM_SYNC_SETTINGS_KEY)
-      return stored ? JSON.parse(stored) : this.getDefaultSyncSettings()
+      if (stored) {
+        const settings = JSON.parse(stored)
+        // Ensure default values for new fields
+        return {
+          ...this.getDefaultSyncSettings(),
+          ...settings,
+        }
+      }
+      return this.getDefaultSyncSettings()
     } catch {
       return this.getDefaultSyncSettings()
     }
@@ -71,12 +91,14 @@ export class VCMConfigManager {
       overwriteLocal: true,
       syncOnStartup: false,
       notifyOnSync: true,
+      batchSize: 10,
+      retryAttempts: 3,
     }
   }
 
   static isConfigured(): boolean {
     const config = this.getConfig()
-    return !!(config && config.baseUrl && config.apiKey) // organizationIdの要件を削除
+    return !!(config && config.baseUrl && config.apiKey)
   }
 
   static updateLastSync(): void {
@@ -85,5 +107,27 @@ export class VCMConfigManager {
       config.lastSync = new Date().toISOString()
       this.saveConfig(config)
     }
+  }
+
+  static updateIntegrationId(integrationId: string): void {
+    const config = this.getConfig()
+    if (config) {
+      config.integrationId = integrationId
+      this.saveConfig(config)
+    }
+  }
+
+  static getWebhookSecret(): string {
+    const config = this.getConfig()
+    return config?.webhookSecret || "whisec_lf1jah5h"
+  }
+
+  static generateWebhookSecret(): string {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+    let result = "whisec_"
+    for (let i = 0; i < 8; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return result
   }
 }

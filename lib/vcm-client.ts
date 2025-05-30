@@ -2,7 +2,7 @@
 export interface VCMConfig {
   baseUrl: string
   apiKey: string
-  organizationId: string
+  organizationId?: string // Optional for this VCM system
 }
 
 export interface VCMCredentialType {
@@ -74,13 +74,33 @@ export class VCMClient {
 
   async testConnection(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.config.baseUrl}/api/health`, {
+      // Test the integration endpoint
+      const response = await fetch(`${this.config.baseUrl}/api/integrations/test`, {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
           "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+        },
+        body: JSON.stringify({
+          apiKey: this.config.apiKey,
+          source: "student-login-site",
+        }),
+      })
+
+      if (response.ok) {
+        return true
+      }
+
+      // Fallback: try the credential types endpoint
+      const credentialTypesResponse = await fetch(`${this.config.baseUrl}/api/credential-types`, {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+          Authorization: `Bearer ${this.config.apiKey}`,
         },
       })
-      return response.ok
+
+      return credentialTypesResponse.ok
     } catch (error) {
       console.error("VCM connection test failed:", error)
       return false
@@ -89,22 +109,30 @@ export class VCMClient {
 
   async getCredentialTypes(): Promise<VCMCredentialType[]> {
     try {
-      const response = await fetch(
-        `${this.config.baseUrl}/api/organizations/${this.config.organizationId}/credential-types`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.config.apiKey}`,
-            "Content-Type": "application/json",
-          },
+      const response = await fetch(`${this.config.baseUrl}/api/credential-types`, {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+          Authorization: `Bearer ${this.config.apiKey}`,
         },
-      )
+      })
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
-      return data.credentialTypes || []
+
+      // Handle different response formats
+      if (Array.isArray(data)) {
+        return data
+      } else if (data.credentialTypes && Array.isArray(data.credentialTypes)) {
+        return data.credentialTypes
+      } else if (data.data && Array.isArray(data.data)) {
+        return data.data
+      } else {
+        return []
+      }
     } catch (error) {
       console.error("Failed to fetch credential types:", error)
       throw error
@@ -113,15 +141,13 @@ export class VCMClient {
 
   async getCredentialType(typeId: string): Promise<VCMCredentialType | null> {
     try {
-      const response = await fetch(
-        `${this.config.baseUrl}/api/organizations/${this.config.organizationId}/credential-types/${typeId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.config.apiKey}`,
-            "Content-Type": "application/json",
-          },
+      const response = await fetch(`${this.config.baseUrl}/api/credential-types/${typeId}`, {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+          Authorization: `Bearer ${this.config.apiKey}`,
         },
-      )
+      })
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -174,12 +200,16 @@ export class VCMClient {
   }
 
   private convertVCMTypeToTemplate(vcmType: VCMCredentialType): any {
-    const claims = Object.entries(vcmType.schema.properties).map(([key, property]) => ({
+    // Handle cases where schema might not be fully defined
+    const properties = vcmType.schema?.properties || {}
+    const required = vcmType.schema?.required || []
+
+    const claims = Object.entries(properties).map(([key, property]) => ({
       key,
-      name: property.title,
-      description: property.description,
+      name: property.title || key,
+      description: property.description || `${key} field`,
       type: this.mapSchemaTypeToClaimType(property.type, property.format),
-      required: vcmType.schema.required.includes(key),
+      required: required.includes(key),
       selectiveDisclosure: property.selectiveDisclosure || false,
       defaultValue: property.default,
       enum: property.enum,
@@ -187,16 +217,22 @@ export class VCMClient {
 
     return {
       id: vcmType.id,
-      name: vcmType.display.name,
-      description: vcmType.display.description,
-      type: vcmType.issuanceConfig.type,
-      context: vcmType.issuanceConfig.context,
+      name: vcmType.display?.name || vcmType.name,
+      description: vcmType.display?.description || vcmType.description,
+      type: vcmType.issuanceConfig?.type || ["VerifiableCredential"],
+      context: vcmType.issuanceConfig?.context || ["https://www.w3.org/2018/credentials/v1"],
       claims,
-      display: vcmType.display,
-      validityPeriod: vcmType.issuanceConfig.validityPeriod,
-      issuer: vcmType.issuanceConfig.issuer,
-      version: vcmType.version,
-      status: vcmType.status,
+      display: {
+        name: vcmType.display?.name || vcmType.name,
+        locale: vcmType.display?.locale || "ja-JP",
+        backgroundColor: vcmType.display?.backgroundColor || "#1e40af",
+        textColor: vcmType.display?.textColor || "#ffffff",
+        logo: vcmType.display?.logo,
+      },
+      validityPeriod: vcmType.issuanceConfig?.validityPeriod || 365,
+      issuer: vcmType.issuanceConfig?.issuer || "https://university.example.com",
+      version: vcmType.version || "1.0.0",
+      status: vcmType.status || "active",
       vcmSource: true,
       lastSynced: new Date().toISOString(),
     }
@@ -251,6 +287,50 @@ export class VCMClient {
   async clearLocalTemplates(): Promise<void> {
     if (typeof window !== "undefined") {
       localStorage.removeItem("vcm_synced_templates")
+    }
+  }
+
+  // Integration-specific methods
+  async registerIntegration(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.config.baseUrl}/api/integrations/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+        },
+        body: JSON.stringify({
+          name: "Student Login Site",
+          url: window.location.origin,
+          apiKey: this.config.apiKey,
+          webhookSecret: "whisec_lf1jah5h", // This should match the VCM configuration
+          autoSync: true,
+        }),
+      })
+
+      return response.ok
+    } catch (error) {
+      console.error("Failed to register integration:", error)
+      return false
+    }
+  }
+
+  async getIntegrationStatus(): Promise<any> {
+    try {
+      const response = await fetch(`${this.config.baseUrl}/api/integrations/status`, {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+        },
+      })
+
+      if (response.ok) {
+        return await response.json()
+      }
+      return null
+    } catch (error) {
+      console.error("Failed to get integration status:", error)
+      return null
     }
   }
 }
@@ -464,5 +544,19 @@ export class MockVCMClient extends VCMClient {
   async getCredentialType(typeId: string): Promise<VCMCredentialType | null> {
     await new Promise((resolve) => setTimeout(resolve, 800))
     return mockVCMCredentialTypes.find((type) => type.id === typeId) || null
+  }
+
+  async registerIntegration(): Promise<boolean> {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    return true
+  }
+
+  async getIntegrationStatus(): Promise<any> {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return {
+      status: "active",
+      lastSync: new Date().toISOString(),
+      webhookUrl: "https://v0-verifiable-credential-manager.vercel.app/api/webhooks/credential-issued",
+    }
   }
 }
