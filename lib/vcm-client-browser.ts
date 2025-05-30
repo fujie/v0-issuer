@@ -86,8 +86,20 @@ export class VCMBrowserClient {
     this.useMockData = useMockData
   }
 
-  async testConnection(): Promise<{ success: boolean; message?: string; version?: string }> {
+  async testConnection(): Promise<{
+    success: boolean
+    message?: string
+    version?: string
+    statusCode?: number
+    error?: string
+    endpoint?: string
+    troubleshooting?: string[]
+    suggestedActions?: string[]
+    mode?: string
+  }> {
     try {
+      console.log(`Testing VCM connection to ${this.config.baseUrl} (Mock: ${this.useMockData})`)
+
       const response = await fetch("/api/vcm/test-connection", {
         method: "POST",
         headers: {
@@ -101,17 +113,39 @@ export class VCMBrowserClient {
       })
 
       const result = await response.json()
+      console.log("Test connection result:", result)
+
+      // Log additional details for debugging
+      if (!result.success) {
+        console.error("Connection test failed:", {
+          statusCode: result.statusCode,
+          endpoint: result.endpoint,
+          error: result.error,
+          troubleshooting: result.troubleshooting,
+        })
+      }
+
       return result
     } catch (error) {
+      console.error("Connection test error:", error)
       return {
         success: false,
         message: `接続テストでエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
+        error: error instanceof Error ? error.name : "UnknownError",
+        troubleshooting: [
+          "ネットワーク接続を確認してください",
+          "ブラウザのコンソールでエラーの詳細を確認してください",
+          "デモモードを使用することをお勧めします",
+        ],
+        suggestedActions: ["デモモードに切り替える", "ページを再読み込みする"],
       }
     }
   }
 
   async getCredentialTypes(): Promise<VCMCredentialType[]> {
     try {
+      console.log(`Getting credential types from ${this.config.baseUrl} (Mock: ${this.useMockData})`)
+
       const params = new URLSearchParams({
         baseUrl: this.config.baseUrl,
         apiKey: this.config.apiKey,
@@ -126,6 +160,7 @@ export class VCMBrowserClient {
       })
 
       const result = await response.json()
+      console.log("Get credential types result:", result)
 
       if (!result.success) {
         throw new Error(result.message || "クレデンシャルタイプの取得に失敗しました")
@@ -147,6 +182,8 @@ export class VCMBrowserClient {
     autoSync?: boolean
   }): Promise<VCMIntegration> {
     try {
+      console.log(`Registering integration with ${this.config.baseUrl} (Mock: ${this.useMockData})`)
+
       const response = await fetch("/api/vcm/register-integration", {
         method: "POST",
         headers: {
@@ -161,6 +198,7 @@ export class VCMBrowserClient {
       })
 
       const result = await response.json()
+      console.log("Register integration result:", result)
 
       if (!result.success) {
         throw new Error(result.message || "統合の登録に失敗しました")
@@ -180,6 +218,8 @@ export class VCMBrowserClient {
     lastSync: string
   }> {
     try {
+      console.log(`Syncing credential types from ${this.config.baseUrl} (Mock: ${this.useMockData})`)
+
       const credentialTypes = await this.getCredentialTypes()
       const syncResult = {
         success: true,
@@ -206,6 +246,7 @@ export class VCMBrowserClient {
 
       return syncResult
     } catch (error) {
+      console.error("Failed to sync credential types:", error)
       return {
         success: false,
         synced: 0,
