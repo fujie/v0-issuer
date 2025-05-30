@@ -2,12 +2,17 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, Check, Download, Copy, ExternalLink } from "lucide-react"
+import { Check, Download, Copy, ExternalLink, Bug, Settings } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { QRCodeFallback } from "@/components/qr-code-fallback"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { CredentialTemplateSelectorEnhanced } from "@/components/credential-template-selector-enhanced"
+import { issueCredentialFromTemplate } from "@/lib/credential-service-enhanced"
+import { CredentialTemplateManager } from "@/lib/credential-templates-enhanced"
+import Link from "next/link"
 
 // Demo user data
 const demoUser = {
@@ -22,108 +27,118 @@ export default function DashboardDemo() {
   const [isLoading, setIsLoading] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [credential, setCredential] = useState<string | null>(null)
+  const [credentialDebugInfo, setCredentialDebugInfo] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [credentialOffer, setCredentialOffer] = useState<string | null>(null)
-  const [credentialOfferUri, setCredentialOfferUri] = useState<string | null>(null)
   const [qrCodeData, setQrCodeData] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [showTestDialog, setShowTestDialog] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<any>(null)
 
-  const handleIssue = async () => {
+  const handleTemplateSelect = async (templateId: string, selectedClaims: string[]) => {
     setIsLoading(true)
     setError(null)
 
     try {
-      // Simulate OpenID4VCI credential issuance flow
-      await new Promise((resolve) => setTimeout(resolve, 500))
-
-      // Generate SD-JWT according to OpenID4VCI
-      // Base64url encoding function that safely handles Unicode characters
-      function base64urlEncode(str) {
-        // First convert the string to UTF-8
-        const utf8Bytes = new TextEncoder().encode(str)
-        // Convert bytes to binary string
-        let binaryStr = ""
-        utf8Bytes.forEach((byte) => {
-          binaryStr += String.fromCharCode(byte)
-        })
-        // Base64 encode and make URL safe
-        return btoa(binaryStr).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+      const template = await CredentialTemplateManager.getTemplate(templateId)
+      if (!template) {
+        throw new Error("テンプレートが見つかりません")
       }
 
-      // Generate salts for selective disclosure
-      function generateSalt() {
-        return Math.random().toString(36).substring(2, 15)
-      }
+      setSelectedTemplate(template)
 
-      // Create header
-      const header = {
-        alg: "ES256",
-        typ: "vc+sd-jwt",
-        kid: "university-issuer-key-2023",
-      }
-
-      // Create disclosures with safe encoding
-      const salt1 = generateSalt()
-      const salt2 = generateSalt()
-      const salt3 = generateSalt()
-      const salt4 = generateSalt()
-
-      // Create disclosure arrays
-      const disclosureArrays = [
-        [salt1, "name", demoUser.name],
-        [salt2, "studentId", demoUser.studentId],
-        [salt3, "department", demoUser.department],
-        [salt4, "status", "enrolled"],
-      ]
-
-      // Convert to JSON strings and encode
-      const disclosures = disclosureArrays.map((arr) => base64urlEncode(JSON.stringify(arr)))
-
-      // Create JWT payload according to OpenID4VCI
-      const now = Math.floor(Date.now() / 1000)
-      const payload = {
-        iss: "https://university-issuer.example.com",
-        sub: demoUser.id,
-        iat: now,
-        exp: now + 30 * 24 * 60 * 60, // 30 days
-        cnf: {
-          jwk: {
-            kty: "EC",
-            crv: "P-256",
-            x: "7xbG-J0AQtpPArBOYNv1x9_JPvgBWGI40rZnwjNzTuc",
-            y: "pBRgr0oi_I-C_zszVCT3XcCYTq8jar8XYRiUoEhUQ4Y",
-          },
-        },
-        vc: {
-          "@context": ["https://www.w3.org/2018/credentials/v1"],
-          type: ["VerifiableCredential", "StudentCredential"],
-          credentialSubject: {},
-        },
-        _sd: disclosures,
-      }
-
-      // Encode header and payload
-      const encodedHeader = base64urlEncode(JSON.stringify(header))
-      const encodedPayload = base64urlEncode(JSON.stringify(payload))
-
-      // In a real implementation, sign the JWT
-      // For demo purposes, we'll use a placeholder signature
-      const signature = "SIMULATED_SIGNATURE_FOR_DEMO_PURPOSES_ONLY"
-
-      // Combine to form the SD-JWT
-      const sdJwt = `${encodedHeader}.${encodedPayload}.${signature}~${disclosures.join("~")}`
+      // Issue credential using the enhanced service
+      const sdJwt = await issueCredentialFromTemplate({
+        templateId,
+        userId: demoUser.id,
+        selectedClaims,
+      })
 
       setCredential(sdJwt)
 
-      // Generate unique IDs
+      // Parse the SD-JWT for debug info
+      const [jwt, ...disclosures] = sdJwt.split("~")
+      const [headerB64, payloadB64, signature] = jwt.split(".")
+
+      function decodeBase64url(str: string) {
+        const base64 = str.replace(/-/g, "+").replace(/_/g, "/")
+        const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
+        const binaryString = atob(padded)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i)
+        }
+        const utf8String = new TextDecoder("utf-8").decode(bytes)
+        return JSON.parse(utf8String)
+      }
+
+      const header = decodeBase64url(headerB64)
+      const payload = decodeBase64url(payloadB64)
+
+      const decodedDisclosures = disclosures.map((disclosure) => {
+        try {
+          return decodeBase64url(disclosure)
+        } catch (e) {
+          return ["デコード失敗", "無効な開示値"]
+        }
+      })
+
+      // Create debug info
+      const debugInfo = {
+        template,
+        selectedClaims,
+        header,
+        payload,
+        disclosures: decodedDisclosures,
+        encodedHeader: headerB64,
+        encodedPayload: payloadB64,
+        signature,
+        sdJwtParts: {
+          jwt: `${headerB64}.${payloadB64}.${signature}`,
+          disclosures: disclosures,
+        },
+        verifiableCredential: {
+          "@context": payload.vc["@context"],
+          type: payload.vc.type,
+          issuer: payload.iss,
+          issuanceDate: new Date(payload.iat * 1000).toISOString(),
+          expirationDate: new Date(payload.exp * 1000).toISOString(),
+          credentialSubject: {
+            id: `did:example:${payload.sub}`,
+            ...payload.vc.credentialSubject,
+            // Add disclosed claims
+            ...Object.fromEntries(
+              decodedDisclosures.filter((d) => Array.isArray(d) && d.length >= 3).map((d) => [d[1], d[2]]),
+            ),
+          },
+          proof: {
+            type: "JsonWebSignature2020",
+            created: new Date(payload.iat * 1000).toISOString(),
+            verificationMethod: `${payload.iss}#${header.kid}`,
+            proofPurpose: "assertionMethod",
+            jws: `${headerB64}..${signature}`,
+          },
+        },
+        selectiveDisclosure: {
+          totalClaims: decodedDisclosures.length,
+          disclosableClaims: decodedDisclosures.map((arr, index) => ({
+            salt: Array.isArray(arr) ? arr[0] : "unknown",
+            claim: Array.isArray(arr) ? arr[1] : "unknown",
+            value: Array.isArray(arr) ? arr[2] : "unknown",
+            disclosure: disclosures[index],
+          })),
+        },
+      }
+
+      setCredentialDebugInfo(debugInfo)
+
+      // Generate Credential Offer
       const credentialOfferId = `offer_${Math.random().toString(36).substring(2, 15)}`
       const preAuthCode = `pre_auth_${Math.random().toString(36).substring(2, 15)}`
 
-      // Create Credential Offer object according to OpenID4VCI ID2
       const credentialOfferObject = {
         credential_issuer: `${window.location.origin}/api/credential-issuer`,
-        credential_configuration_ids: ["StudentCredential"],
+        credential_configuration_ids: [template.id],
         grants: {
           authorization_code: {
             issuer_state: `state_${Math.random().toString(36).substring(2, 10)}`,
@@ -135,12 +150,10 @@ export default function DashboardDemo() {
         },
       }
 
-      // Embed credential offer directly in QR code
       const credentialOfferJson = JSON.stringify(credentialOfferObject)
       const credentialOfferUriScheme = `openid-credential-offer://?credential_offer=${encodeURIComponent(credentialOfferJson)}`
 
       setCredentialOffer(JSON.stringify(credentialOfferObject, null, 2))
-      setCredentialOfferUri(null)
       setQrCodeData(credentialOfferUriScheme)
 
       setIsOpen(true)
@@ -159,7 +172,7 @@ export default function DashboardDemo() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = "student-credential.json"
+    a.download = `${selectedTemplate?.name || "credential"}.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -192,9 +205,17 @@ export default function DashboardDemo() {
       <header className="container mx-auto py-6">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold">学生証明書発行システム</h1>
-          <Button variant="outline" onClick={handleLogout}>
-            ログアウト
-          </Button>
+          <div className="flex space-x-2">
+            <Link href="/admin">
+              <Button variant="outline" size="sm">
+                <Settings className="h-4 w-4 mr-2" />
+                管理
+              </Button>
+            </Link>
+            <Button variant="outline" onClick={handleLogout}>
+              ログアウト
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -237,59 +258,46 @@ export default function DashboardDemo() {
 
           <Card>
             <CardHeader>
-              <CardTitle>学生証明書の発行</CardTitle>
-              <CardDescription>OpenID4VCI ID2準拠のSD-JWT形式の学生証明書を発行できます</CardDescription>
+              <CardTitle>証明書の発行</CardTitle>
+              <CardDescription>
+                ローカルテンプレートとVerifiable Credential
+                Managerで定義されたテンプレートから証明書を選択して発行できます
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-gray-500 mb-4">発行される証明書には以下の情報が含まれます：</p>
-              <ul className="list-disc pl-5 text-sm text-gray-500 space-y-1">
-                <li>氏名</li>
-                <li>学籍番号</li>
-                <li>所属学部/学科</li>
-                <li>在籍状況</li>
-                <li>発行日時</li>
-              </ul>
-
-              <div className="mt-4 p-3 bg-blue-50 rounded-md border border-blue-100">
-                <p className="text-xs text-blue-700">
-                  <strong>OpenID for Verifiable Credential Issuance Implementers Draft 2</strong> に準拠した
-                  SD-JWT形式の証明書が発行されます。Credential Offerを使用してモバイルウォレットとの連携を行います。
-                </p>
-              </div>
+              <CredentialTemplateSelectorEnhanced onTemplateSelect={handleTemplateSelect} isLoading={isLoading} />
             </CardContent>
-            <CardFooter>
-              <Button onClick={handleIssue} disabled={isLoading} className="w-full">
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    発行中...
-                  </>
-                ) : (
-                  "学生証明書を発行する"
-                )}
-              </Button>
-            </CardFooter>
           </Card>
         </div>
       </main>
 
-      {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
+      {error && (
+        <div className="container mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        </div>
+      )}
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center">
               <Check className="h-5 w-5 text-green-500 mr-2" />
-              証明書が発行されました
+              {selectedTemplate?.display.name}が発行されました
             </DialogTitle>
-            <DialogDescription>OpenID4VCI ID2準拠のSD-JWT形式の学生証明書が正常に発行されました。</DialogDescription>
+            <DialogDescription>OpenID4VCI ID2準拠のSD-JWT形式の証明書が正常に発行されました。</DialogDescription>
           </DialogHeader>
 
           <Tabs defaultValue="qrcode" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="qrcode">QRコード</TabsTrigger>
               <TabsTrigger value="offer">Credential Offer</TabsTrigger>
               <TabsTrigger value="credential">証明書</TabsTrigger>
+              <TabsTrigger value="debug">
+                <Bug className="h-4 w-4 mr-1" />
+                デバッグ
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="qrcode" className="mt-4">
@@ -371,6 +379,175 @@ export default function DashboardDemo() {
                   証明書をダウンロード
                 </Button>
               </div>
+            </TabsContent>
+
+            <TabsContent value="debug" className="mt-4">
+              {credentialDebugInfo && (
+                <div className="space-y-4">
+                  <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+                    <div className="flex items-start">
+                      <Bug className="h-4 w-4 text-yellow-600 mr-2 mt-0.5" />
+                      <div>
+                        <h3 className="text-sm font-medium text-yellow-800">デバッグ情報</h3>
+                        <p className="text-xs text-yellow-700 mt-1">
+                          開発・検証用の詳細情報です。本番環境では表示されません。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Accordion type="single" collapsible className="w-full">
+                    <AccordionItem value="template-info">
+                      <AccordionTrigger>使用されたテンプレート情報</AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-3">
+                          <div className="bg-gray-50 p-3 rounded-md">
+                            <h4 className="text-sm font-medium mb-2">
+                              テンプレート: {credentialDebugInfo.template.display.name}
+                            </h4>
+                            <p className="text-xs text-gray-600 mb-2">{credentialDebugInfo.template.description}</p>
+                            <div className="text-xs space-y-1">
+                              <p>
+                                <strong>ID:</strong> {credentialDebugInfo.template.id}
+                              </p>
+                              <p>
+                                <strong>ソース:</strong>{" "}
+                                {credentialDebugInfo.template.source === "vcm" ? "VCM" : "ローカル"}
+                              </p>
+                              <p>
+                                <strong>有効期限:</strong> {credentialDebugInfo.template.validityPeriod}日
+                              </p>
+                              <p>
+                                <strong>発行者:</strong> {credentialDebugInfo.template.issuer}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="bg-gray-50 p-3 rounded-md">
+                            <h4 className="text-sm font-medium mb-2">選択された開示項目</h4>
+                            <div className="flex flex-wrap gap-1">
+                              {credentialDebugInfo.selectedClaims.map((claim: string) => (
+                                <Badge key={claim} variant="outline" className="text-xs">
+                                  {credentialDebugInfo.template.claims.find((c: any) => c.key === claim)?.name || claim}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="verifiable-credential">
+                      <AccordionTrigger>Verifiable Credential 構造</AccordionTrigger>
+                      <AccordionContent>
+                        <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-80">
+                          <pre className="text-xs">
+                            {JSON.stringify(credentialDebugInfo.verifiableCredential, null, 2)}
+                          </pre>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="jwt-header">
+                      <AccordionTrigger>JWT ヘッダー</AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-2">
+                          <div className="bg-gray-50 p-4 rounded-md">
+                            <pre className="text-xs">{JSON.stringify(credentialDebugInfo.header, null, 2)}</pre>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            <p>
+                              <strong>エンコード済み:</strong> {credentialDebugInfo.encodedHeader}
+                            </p>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="jwt-payload">
+                      <AccordionTrigger>JWT ペイロード</AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-2">
+                          <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-60">
+                            <pre className="text-xs">{JSON.stringify(credentialDebugInfo.payload, null, 2)}</pre>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            <p>
+                              <strong>エンコード済み:</strong> {credentialDebugInfo.encodedPayload}
+                            </p>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="selective-disclosure">
+                      <AccordionTrigger>選択的開示情報</AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 gap-3">
+                            <div className="text-sm">
+                              <strong>開示可能なクレーム数:</strong>{" "}
+                              {credentialDebugInfo.selectiveDisclosure.totalClaims}
+                            </div>
+                            {credentialDebugInfo.selectiveDisclosure.disclosableClaims.map(
+                              (item: any, index: number) => (
+                                <div key={index} className="border rounded-md p-3 bg-gray-50">
+                                  <div className="grid grid-cols-1 gap-2 text-xs">
+                                    <div>
+                                      <strong>クレーム:</strong> {item.claim}
+                                    </div>
+                                    <div>
+                                      <strong>値:</strong> {item.value}
+                                    </div>
+                                    <div>
+                                      <strong>ソルト:</strong> {item.salt}
+                                    </div>
+                                    <div>
+                                      <strong>開示値:</strong>{" "}
+                                      <code className="bg-white px-1 rounded">{item.disclosure}</code>
+                                    </div>
+                                  </div>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="sd-jwt-structure">
+                      <AccordionTrigger>SD-JWT 構造</AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-3">
+                          <div>
+                            <h4 className="text-sm font-medium mb-2">JWT部分</h4>
+                            <div className="bg-gray-50 p-3 rounded-md">
+                              <code className="text-xs break-all">{credentialDebugInfo.sdJwtParts.jwt}</code>
+                            </div>
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-medium mb-2">開示値部分</h4>
+                            <div className="space-y-2">
+                              {credentialDebugInfo.sdJwtParts.disclosures.map((disclosure: string, index: number) => (
+                                <div key={index} className="bg-gray-50 p-2 rounded-md">
+                                  <div className="text-xs text-gray-600 mb-1">開示値 {index + 1}:</div>
+                                  <code className="text-xs break-all">{disclosure}</code>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-medium mb-2">署名</h4>
+                            <div className="bg-gray-50 p-3 rounded-md">
+                              <code className="text-xs break-all">{credentialDebugInfo.signature}</code>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">※ デモ用の模擬署名です</p>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </DialogContent>
