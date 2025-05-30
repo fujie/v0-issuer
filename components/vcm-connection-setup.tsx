@@ -21,7 +21,6 @@ import {
   Link,
   Database,
   Webhook,
-  Info,
 } from "lucide-react"
 import { VCMConfigManager, type VCMConnectionConfig, type VCMSyncSettings } from "@/lib/vcm-config"
 import { VCMBrowserClient } from "@/lib/vcm-client-browser"
@@ -45,17 +44,14 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     overwriteLocal: true,
     syncOnStartup: false,
     notifyOnSync: true,
-    batchSize: 10,
-    retryAttempts: 3,
   })
 
   const [isTestingConnection, setIsTestingConnection] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<"unknown" | "success" | "error">("unknown")
   const [connectionError, setConnectionError] = useState<string | null>(null)
-  const [connectionDetails, setConnectionDetails] = useState<any>(null)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<any>(null)
-  const [useMockData, setUseMockData] = useState(true) // デフォルトでデモモードを有効に
+  const [useMockData, setUseMockData] = useState(false)
   const [integrationStatus, setIntegrationStatus] = useState<any>(null)
   const [isRegisteringIntegration, setIsRegisteringIntegration] = useState(false)
 
@@ -89,7 +85,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setIsTestingConnection(true)
     setConnectionStatus("unknown")
     setConnectionError(null)
-    setConnectionDetails(null)
 
     try {
       const client = new VCMBrowserClient(config, useMockData)
@@ -97,8 +92,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
 
       if (result.success) {
         setConnectionStatus("success")
-        setConnectionDetails(result)
-
         // For demo mode, set mock integration status
         if (useMockData) {
           setIntegrationStatus({
@@ -110,7 +103,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
       } else {
         setConnectionStatus("error")
         setConnectionError(result.message || "接続に失敗しました")
-        setConnectionDetails(result)
       }
     } catch (error) {
       setConnectionStatus("error")
@@ -186,7 +178,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     })
     setConnectionStatus("unknown")
     setConnectionError(null)
-    setConnectionDetails(null)
     setSyncResult(null)
     setIntegrationStatus(null)
     onConfigChange?.(false)
@@ -207,14 +198,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
         <CardDescription>VCMとの連携を設定して、クレデンシャルタイプとスキーマを同期します</CardDescription>
       </CardHeader>
       <CardContent>
-        <Alert className="mb-4">
-          <Info className="h-4 w-4" />
-          <AlertTitle>デモモードについて</AlertTitle>
-          <AlertDescription>
-            現在、VCMサーバーは開発中のため、デモモードを使用することをお勧めします。デモモードでは、実際のVCMサーバーに接続せずにモックデータを使用して機能をテストできます。
-          </AlertDescription>
-        </Alert>
-
         <Tabs defaultValue="connection" className="w-full">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="connection">接続設定</TabsTrigger>
@@ -245,11 +228,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                     onChange={(e) => handleConfigChange("baseUrl", e.target.value)}
                     disabled={useMockData}
                   />
-                  {!useMockData && (
-                    <div className="text-xs text-gray-500">
-                      例: https://vcm-api.example.com または http://localhost:3001
-                    </div>
-                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -307,34 +285,6 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   <AlertTitle>{connectionStatus === "success" ? "接続成功" : "接続失敗"}</AlertTitle>
                   <AlertDescription>
                     {connectionStatus === "success" ? "VCMとの接続が正常に確立されました。" : connectionError}
-
-                    {connectionDetails && connectionDetails.statusCode && (
-                      <div className="mt-2 text-sm">
-                        <p>ステータスコード: {connectionDetails.statusCode}</p>
-                        {connectionDetails.error && <p>エラータイプ: {connectionDetails.error}</p>}
-                      </div>
-                    )}
-
-                    {connectionStatus === "error" && !useMockData && (
-                      <div className="mt-2">
-                        <p className="text-sm font-medium">トラブルシューティング:</p>
-                        <ul className="list-disc list-inside text-sm mt-1">
-                          <li>URLが正しいか確認してください</li>
-                          <li>VCMサーバーが起動しているか確認してください</li>
-                          <li>API Keyが正しいか確認してください</li>
-                          <li>ネットワーク接続を確認してください</li>
-                          <li>
-                            <Button
-                              variant="link"
-                              className="p-0 h-auto text-sm underline"
-                              onClick={() => setUseMockData(true)}
-                            >
-                              デモモードを使用する
-                            </Button>
-                          </li>
-                        </ul>
-                      </div>
-                    )}
                   </AlertDescription>
                 </Alert>
               )}
@@ -498,7 +448,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                       <div>
                         <p>同期中にエラーが発生しました：</p>
                         <ul className="list-disc list-inside mt-1">
-                          {syncResult.errors.map((error: string, index: number) => (
+                          {syncResult.errors.map((error, index) => (
                             <li key={index} className="text-sm">
                               {error}
                             </li>

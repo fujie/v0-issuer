@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Search, RefreshCw, FileText, CheckCircle, AlertCircle, Loader2, Info } from "lucide-react"
+import { Search, RefreshCw, FileText, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
 import { VCMBrowserClient, type VCMCredentialType } from "@/lib/vcm-client-browser"
 import { VCMConfigManager } from "@/lib/vcm-config"
 
@@ -24,19 +24,12 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "deprecated">("all")
-  const [useMockData, setUseMockData] = useState(true) // デフォルトでデモモードを有効に
 
   const loadCredentialTypes = async () => {
     const config = VCMConfigManager.getConfig()
-    if (!config) {
+    if (!config || !config.enabled) {
       setError("VCM連携が設定されていません")
       return
-    }
-
-    // Enable the config for demo mode
-    if (useMockData && !config.enabled) {
-      config.enabled = true
-      VCMConfigManager.saveConfig(config)
     }
 
     setIsLoading(true)
@@ -44,7 +37,7 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
 
     try {
       // Use browser client that calls API routes
-      const client = new VCMBrowserClient(config, useMockData)
+      const client = new VCMBrowserClient(config, true) // Use mock data for demo
       const types = await client.getCredentialTypes()
       setCredentialTypes(types)
       setFilteredTypes(types)
@@ -57,7 +50,7 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
 
   useEffect(() => {
     loadCredentialTypes()
-  }, [useMockData])
+  }, [])
 
   useEffect(() => {
     let filtered = credentialTypes
@@ -115,6 +108,15 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
     return new Date(dateString).toLocaleDateString("ja-JP")
   }
 
+  if (!VCMConfigManager.isConfigured()) {
+    return (
+      <Alert>
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>VCM連携を設定してからクレデンシャルタイプを参照してください。</AlertDescription>
+      </Alert>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -129,37 +131,14 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
                 Verifiable Credential Managerで定義されたクレデンシャルタイプを参照・選択できます
               </CardDescription>
             </div>
-            <div className="flex space-x-2">
-              <div className="flex items-center space-x-2">
-                <Label htmlFor="use-mock-data" className="text-sm">
-                  デモモード
-                </Label>
-                <input
-                  id="use-mock-data"
-                  type="checkbox"
-                  checked={useMockData}
-                  onChange={(e) => setUseMockData(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-              </div>
-              <Button onClick={loadCredentialTypes} disabled={isLoading} variant="outline">
-                {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                更新
-              </Button>
-            </div>
+            <Button onClick={loadCredentialTypes} disabled={isLoading} variant="outline">
+              {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              更新
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {useMockData && (
-              <Alert>
-                <Info className="h-4 w-4" />
-                <AlertDescription>
-                  デモモードが有効です。モックデータを使用してクレデンシャルタイプを表示しています。
-                </AlertDescription>
-              </Alert>
-            )}
-
             {/* Search and Filter */}
             <div className="flex space-x-4">
               <div className="flex-1">
@@ -401,13 +380,6 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
                   {searchTerm || statusFilter !== "all"
                     ? "検索条件に一致するクレデンシャルタイプが見つかりません"
                     : "クレデンシャルタイプが見つかりません"}
-                </div>
-              )}
-
-              {isLoading && (
-                <div className="text-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-500" />
-                  <p className="text-gray-500">クレデンシャルタイプを読み込み中...</p>
                 </div>
               )}
             </div>
