@@ -13,12 +13,14 @@ declare global {
     | undefined
 }
 
-// CORSヘッダーを定義
+// 完全なCORSヘッダーを定義
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+  "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Accept, Content-Type, Authorization, User-Agent, Cache-Control",
   "Access-Control-Max-Age": "86400",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Type",
+  Vary: "Origin",
 }
 
 interface OpenID4VCICredentialConfiguration {
@@ -101,9 +103,20 @@ function convertTemplateToConfiguration(template: any): OpenID4VCICredentialConf
   return configuration
 }
 
-export async function GET() {
+// OPTIONSリクエストを処理する関数
+export async function OPTIONS() {
+  console.log("OPTIONS request received for OpenID Credential Issuer metadata")
+
+  return new Response(null, {
+    status: 204, // No Content
+    headers: corsHeaders,
+  })
+}
+
+export async function GET(request: Request) {
   try {
     console.log("OpenID Credential Issuer metadata endpoint called")
+    console.log("Request headers:", Object.fromEntries(request.headers.entries()))
 
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
@@ -166,6 +179,7 @@ export async function GET() {
     const totalConfigurations = Object.keys(issuerMetadata.credential_configurations_supported).length
     console.log(`Generated metadata with ${totalConfigurations} credential configurations`)
 
+    // CORSヘッダーを含めたレスポンスを返す
     return NextResponse.json(issuerMetadata, {
       headers: {
         "Content-Type": "application/json",
@@ -214,11 +228,4 @@ export async function GET() {
       },
     })
   }
-}
-
-export async function OPTIONS() {
-  return new Response(null, {
-    status: 200,
-    headers: corsHeaders,
-  })
 }
