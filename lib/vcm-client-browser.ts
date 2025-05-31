@@ -143,11 +143,18 @@ export class VCMBrowserClient {
 
   async getCredentialTypes(): Promise<VCMCredentialType[]> {
     try {
-      console.log(`Getting credential types from ${this.config.baseUrl} (Mock: ${this.useMockData})`)
+      console.log(`=== VCM getCredentialTypes 開始 ===`)
+      console.log(`エンドポイント: ${this.config.baseUrl}`)
+      console.log(`モックモード: ${this.useMockData}`)
 
       if (this.useMockData) {
-        console.log("Using mock data for credential types")
-        return this.getMockCredentialTypes()
+        console.log("モックデータを使用")
+        const mockData = this.getMockCredentialTypes()
+        console.log("モックデータ:", mockData.length, "件")
+        mockData.forEach((item) => {
+          console.log(`- ${item.id}: ${item.name}`)
+        })
+        return mockData
       }
 
       const params = new URLSearchParams({
@@ -156,69 +163,64 @@ export class VCMBrowserClient {
         useMockData: this.useMockData.toString(),
       })
 
-      const response = await fetch(`/api/vcm/credential-types?${params}`, {
+      const requestUrl = `/api/vcm/credential-types?${params}`
+      console.log("リクエストURL:", requestUrl)
+
+      const response = await fetch(requestUrl, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
       })
 
-      const responseText = await response.text()
-      const responseAnalysis = analyzeResponse(response, responseText)
+      console.log("レスポンス:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+      })
 
-      console.log("VCM API Response Analysis:", responseAnalysis)
+      const responseText = await response.text()
+      console.log("レスポンステキスト長:", responseText.length)
+      console.log("レスポンステキスト（最初の500文字）:", responseText.substring(0, 500))
 
       if (!response.ok) {
-        console.error("API response error:", response.status, responseAnalysis)
-
-        // HTMLレスポンスの場合の特別な処理
-        if (responseAnalysis.isHTML) {
-          console.warn("VCM API returned HTML instead of JSON - likely a server error page")
-          throw new Error(
-            `VCM APIがHTMLページを返しました (ステータス: ${response.status}). ` +
-              `エンドポイントが存在しないか、サーバーエラーが発生している可能性があります。` +
-              `フォールバックデータを使用します。`,
-          )
-        }
-
+        console.error("HTTPエラー:", response.status, responseText)
         throw new Error(`HTTP ${response.status}: ${responseText}`)
-      }
-
-      // HTMLレスポンスをチェック（200ステータスでもHTMLが返される場合がある）
-      if (responseAnalysis.isHTML) {
-        console.warn("VCM API returned HTML with 200 status - likely a routing issue")
-        throw new Error(
-          `VCM APIが正常ステータス(200)でHTMLページを返しました. ` +
-            `APIエンドポイントのルーティングに問題がある可能性があります。` +
-            `フォールバックデータを使用します。`,
-        )
       }
 
       let result: any
       try {
         result = JSON.parse(responseText)
+        console.log("パース済みレスポンス:", result)
       } catch (parseError) {
-        console.error("JSON parse error:", parseError)
-        console.error("Response text:", responseText.substring(0, 500))
-        throw new Error(
-          `VCM APIのレスポンスをJSONとして解析できませんでした. ` +
-            `レスポンス: ${responseText.substring(0, 100)}...` +
-            `フォールバックデータを使用します。`,
-        )
+        console.error("JSONパースエラー:", parseError)
+        console.error("パース対象テキスト:", responseText.substring(0, 200))
+        throw new Error(`JSONパースに失敗: ${responseText.substring(0, 100)}...`)
       }
 
-      console.log("Get credential types result:", result)
-
       if (!result.success) {
+        console.error("API失敗レスポンス:", result)
         throw new Error(result.message || "クレデンシャルタイプの取得に失敗しました")
       }
 
-      return result.credentialTypes || []
+      const credentialTypes = result.credentialTypes || []
+      console.log("取得したクレデンシャルタイプ:", credentialTypes.length, "件")
+      credentialTypes.forEach((type: any) => {
+        console.log(`- ${type.id}: ${type.name || type.display?.name}`)
+      })
+
+      return credentialTypes
     } catch (error) {
-      console.error("Failed to fetch credential types:", error)
+      console.error("=== getCredentialTypes エラー ===")
+      console.error("エラー詳細:", error)
+      console.error("設定:", {
+        baseUrl: this.config.baseUrl,
+        hasApiKey: !!this.config.apiKey,
+        useMockData: this.useMockData,
+      })
 
       // エラーが発生した場合はフォールバックデータを返す
-      console.log("Falling back to mock data due to error")
+      console.log("フォールバックとしてモックデータを返します")
       return this.getMockCredentialTypes()
     }
   }

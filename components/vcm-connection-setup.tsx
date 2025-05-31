@@ -25,7 +25,7 @@ import {
 } from "lucide-react"
 
 import { VCMConfigManager, type VCMConnectionConfig, type VCMSyncSettings } from "@/lib/vcm-config"
-import { LocalStorageHelper } from "@/lib/local-storage-helper"
+import { CredentialTemplateManager } from "@/lib/credential-templates-enhanced"
 
 interface VCMConnectionSetupProps {
   onConfigChange?: (isConfigured: boolean) => void
@@ -239,107 +239,135 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setSyncResult(null)
 
     try {
-      console.log("=== Starting credential types sync ===")
-      console.log("Config:", {
+      console.log("=== VCM同期開始 ===")
+      console.log("設定:", {
         baseUrl: config.baseUrl,
         apiKey: config.apiKey ? `${config.apiKey.substring(0, 8)}...` : null,
         useMockData: config.useMockData,
         enabled: config.enabled,
       })
 
+      // CredentialTemplateManagerを使用して同期
       // API経由でクレデンシャルタイプを取得
-      const params = new URLSearchParams({
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        useMockData: config.useMockData.toString(),
-      })
+      // const params = new URLSearchParams({
+      //   baseUrl: config.baseUrl,
+      //   apiKey: config.apiKey,
+      //   useMockData: config.useMockData.toString(),
+      // })
 
-      const requestUrl = `/api/vcm/credential-types?${params}`
-      console.log("Request URL:", requestUrl)
-      console.log("Request params:", Object.fromEntries(params.entries()))
+      // const requestUrl = `/api/vcm/credential-types?${params}`
+      // console.log("Request URL:", requestUrl)
+      // console.log("Request params:", Object.fromEntries(params.entries()))
 
-      const requestStart = Date.now()
+      // const requestStart = Date.now()
 
-      const response = await fetch(requestUrl, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
+      // const response = await fetch(requestUrl, {
+      //   method: "GET",
+      //   headers: {
+      //     "Content-Type": "application/json",
+      //   },
+      // })
 
-      const requestTime = Date.now() - requestStart
-      console.log("Response received:", {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()),
-        requestTime,
-      })
+      // const requestTime = Date.now() - requestStart
+      // console.log("Response received:", {
+      //   status: response.status,
+      //   statusText: response.statusText,
+      //   headers: Object.fromEntries(response.headers.entries()),
+      //   requestTime,
+      // })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error("HTTP Error Response:", errorText)
-        throw new Error(`HTTP ${response.status}: ${errorText}`)
-      }
+      // if (!response.ok) {
+      //   const errorText = await response.text()
+      //   console.error("HTTP Error Response:", errorText)
+      //   throw new Error(`HTTP ${response.status}: ${errorText}`)
+      // }
 
-      const result = await response.json()
-      console.log("Response data:", result)
+      // const result = await response.json()
+      // console.log("Response data:", result)
 
-      if (!result.success) {
-        throw new Error(result.message || "クレデンシャルタイプの取得に失敗しました")
-      }
+      // if (!result.success) {
+      //   throw new Error(result.message || "クレデンシャルタイプの取得に失敗しました")
+      // }
 
-      const credentialTypes = result.credentialTypes || []
-      console.log("Credential types to sync:", credentialTypes.length)
+      // const credentialTypes = result.credentialTypes || []
+      // console.log("Credential types to sync:", credentialTypes.length)
 
-      // クライアントサイドでローカルストレージに保存
-      let syncedCount = 0
-      const errors: string[] = []
+      // // クライアントサイドでローカルストレージに保存
+      // let syncedCount = 0
+      // const errors: string[] = []
 
-      for (const vcmType of credentialTypes) {
-        try {
-          console.log("Processing credential type:", vcmType.id, vcmType.name)
+      // for (const vcmType of credentialTypes) {
+      //   try {
+      //     console.log("Processing credential type:", vcmType.id, vcmType.name)
 
-          // VCMタイプをローカルテンプレート形式に変換
-          const template = convertVCMTypeToLocalTemplate(vcmType)
+      //     // VCMタイプをローカルテンプレート形式に変換
+      //     const template = convertVCMTypeToLocalTemplate(vcmType)
 
-          // ローカルストレージに保存
-          const existingTemplates = getLocalTemplates()
-          const updatedTemplates = existingTemplates.filter((t) => t.id !== template.id)
-          updatedTemplates.push(template)
+      //     // ローカルストレージに保存
+      //     const existingTemplates = getLocalTemplates()
+      //     const updatedTemplates = existingTemplates.filter((t) => t.id !== template.id)
+      //     updatedTemplates.push(template)
 
-          LocalStorageHelper.setItem("vcm_synced_templates", updatedTemplates)
-          syncedCount++
-          console.log("Successfully synced:", template.id)
-        } catch (error) {
-          const errorMsg = `Failed to sync ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`
-          errors.push(errorMsg)
-          console.error("Sync error for", vcmType.id, ":", error)
-        }
-      }
+      //     LocalStorageHelper.setItem("vcm_synced_templates", updatedTemplates)
+      //     syncedCount++
+      //     console.log("Successfully synced:", template.id)
+      //   } catch (error) {
+      //     const errorMsg = `Failed to sync ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`
+      //     errors.push(errorMsg)
+      //     console.error("Sync error for", vcmType.id, ":", error)
+      //   }
+      // }
 
-      const syncResult = {
-        success: errors.length === 0,
-        synced: syncedCount,
-        errors,
+      // const syncResult = {
+      //   success: errors.length === 0,
+      //   synced: syncedCount,
+      //   errors,
+      //   lastSync: new Date().toISOString(),
+      //   mode: result.mode,
+      //   debugInfo: {
+      //     ...result.debugInfo,
+      //     clientRequestTime: requestTime,
+      //     totalProcessingTime: Date.now() - requestStart,
+      //   },
+      //   requestDetails: {
+      //     url: requestUrl,
+      //     method: "GET",
+      //     params: Object.fromEntries(params.entries()),
+      //     responseStatus: response.status,
+      //     responseTime: requestTime,
+      //   },
+      //   errorDetails: result.errorDetails,
+      // }
+
+      // console.log("Sync completed:", syncResult)
+      // setSyncResult(syncResult)
+
+      // if (syncResult.success) {
+      //   VCMConfigManager.updateLastSync()
+      //   const updatedConfig = { ...config, lastSync: new Date().toISOString() }
+      //   setConfig(updatedConfig)
+      //   VCMConfigManager.saveConfig(updatedConfig)
+      // }
+      const syncResult = await CredentialTemplateManager.syncFromVCM()
+      console.log("同期結果:", syncResult)
+
+      setSyncResult({
+        success: syncResult.success,
+        synced: syncResult.synced,
+        errors: syncResult.errors,
         lastSync: new Date().toISOString(),
-        mode: result.mode,
+        mode: config.useMockData ? "mock" : "vcm",
         debugInfo: {
-          ...result.debugInfo,
-          clientRequestTime: requestTime,
-          totalProcessingTime: Date.now() - requestStart,
+          syncedTemplates: syncResult.templates.map((t) => ({
+            id: t.id,
+            name: t.name,
+            source: t.source,
+          })),
+          totalTemplates: syncResult.templates.length,
+          vcmTemplates: syncResult.templates.filter((t) => t.source === "vcm").length,
+          staticTemplates: syncResult.templates.filter((t) => t.source === "static").length,
         },
-        requestDetails: {
-          url: requestUrl,
-          method: "GET",
-          params: Object.fromEntries(params.entries()),
-          responseStatus: response.status,
-          responseTime: requestTime,
-        },
-        errorDetails: result.errorDetails,
-      }
-
-      console.log("Sync completed:", syncResult)
-      setSyncResult(syncResult)
+      })
 
       if (syncResult.success) {
         VCMConfigManager.updateLastSync()
@@ -348,14 +376,14 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
         VCMConfigManager.saveConfig(updatedConfig)
       }
     } catch (error) {
-      console.error("=== Sync error ===", error)
+      console.error("=== 同期エラー ===", error)
       const errorResult = {
         success: false,
         synced: 0,
         errors: [error instanceof Error ? error.message : "同期に失敗しました"],
         lastSync: new Date().toISOString(),
         errorDetails: {
-          type: "CLIENT_ERROR",
+          type: "SYNC_ERROR",
           errorMessage: error instanceof Error ? error.message : "Unknown error",
           stack: error instanceof Error ? error.stack : undefined,
           timestamp: new Date().toISOString(),

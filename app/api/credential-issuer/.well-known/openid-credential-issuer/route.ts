@@ -13,6 +13,14 @@ declare global {
     | undefined
 }
 
+// CORSヘッダーを定義
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+  "Access-Control-Max-Age": "86400",
+}
+
 interface OpenID4VCICredentialConfiguration {
   format: string
   scope?: string
@@ -162,6 +170,7 @@ export async function GET() {
       headers: {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache, no-store, must-revalidate",
+        ...corsHeaders,
       },
     })
   } catch (error) {
@@ -201,7 +210,15 @@ export async function GET() {
     return NextResponse.json(fallbackMetadata, {
       headers: {
         "Content-Type": "application/json",
+        ...corsHeaders,
       },
     })
   }
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 200,
+    headers: corsHeaders,
+  })
 }

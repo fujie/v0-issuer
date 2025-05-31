@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server"
 
+// CORSヘッダーを定義
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+  "Access-Control-Max-Age": "86400",
+}
+
 export async function GET() {
   const metadata = {
     issuer: "https://university-issuer.example.com",
@@ -169,20 +177,15 @@ export async function GET() {
 
   return NextResponse.json(metadata, {
     headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Content-Type": "application/json",
+      ...corsHeaders,
     },
   })
 }
 
 export async function OPTIONS() {
-  return new NextResponse(null, {
+  return new Response(null, {
     status: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
+    headers: corsHeaders,
   })
 }

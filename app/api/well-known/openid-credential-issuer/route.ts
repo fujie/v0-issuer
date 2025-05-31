@@ -12,6 +12,14 @@ declare global {
     | undefined
 }
 
+// CORSヘッダーを定義
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+  "Access-Control-Max-Age": "86400",
+}
+
 export async function GET(request: Request) {
   try {
     console.log("API endpoint /api/well-known/openid-credential-issuer called")
@@ -156,18 +164,6 @@ export async function GET(request: Request) {
     } else {
       console.log("No VCM templates found in global memory or invalid format")
 
-      // デバッグ情報
-      if (vcmConfig) {
-        console.log("VCM config structure:", {
-          enabled: vcmConfig.enabled,
-          useMockData: vcmConfig.useMockData,
-          lastSync: vcmConfig.lastSync,
-          syncedTemplatesType: typeof vcmConfig.syncedTemplates,
-          isArray: Array.isArray(vcmConfig.syncedTemplates),
-          syncedTemplatesLength: vcmConfig.syncedTemplates?.length,
-        })
-      }
-
       // デフォルトのVCMテンプレートを追加
       console.log("Adding default VCM templates")
 
@@ -249,10 +245,8 @@ export async function GET(request: Request) {
     return NextResponse.json(metadata, {
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
         "Cache-Control": "no-cache, no-store, must-revalidate",
+        ...corsHeaders,
       },
     })
   } catch (error) {
@@ -284,9 +278,7 @@ export async function GET(request: Request) {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        ...corsHeaders,
       },
     })
   }
@@ -295,10 +287,6 @@ export async function GET(request: Request) {
 export async function OPTIONS() {
   return new Response(null, {
     status: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
+    headers: corsHeaders,
   })
 }

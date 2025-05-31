@@ -126,10 +126,22 @@ export class CredentialTemplateManager {
     errors: string[]
     templates: EnhancedCredentialTemplate[]
   }> {
-    console.log("CredentialTemplateManager.syncFromVCM called")
+    console.log("=== CredentialTemplateManager.syncFromVCM 開始 ===")
     const config = VCMConfigManager.getConfig()
+    console.log(
+      "VCM設定:",
+      config
+        ? {
+            enabled: config.enabled,
+            useMockData: config.useMockData,
+            hasBaseUrl: !!config.baseUrl,
+            hasApiKey: !!config.apiKey,
+          }
+        : "設定なし",
+    )
+
     if (!config || !config.enabled) {
-      console.log("VCM integration not enabled")
+      console.log("VCM連携が無効です")
       return {
         success: false,
         synced: 0,
@@ -139,40 +151,51 @@ export class CredentialTemplateManager {
     }
 
     try {
-      // Use VCMBrowserClient for browser-safe operations
-      console.log("Creating VCMBrowserClient with config:", { ...config, apiKey: "[REDACTED]" })
+      // VCMBrowserClientを作成
+      console.log("VCMBrowserClientを作成中...")
       const client = new VCMBrowserClient(config, config.useMockData ?? false)
-      console.log("Fetching credential types from VCM")
+
+      // クレデンシャルタイプを取得
+      console.log("VCMからクレデンシャルタイプを取得中...")
       const vcmTypes = await client.getCredentialTypes()
-      console.log("Received credential types from VCM:", vcmTypes.length)
+      console.log("取得したVCMタイプ:", vcmTypes.length, "件")
 
       const syncedTemplates: EnhancedCredentialTemplate[] = []
       const errors: string[] = []
 
+      // 各VCMタイプをテンプレートに変換
       for (const vcmType of vcmTypes) {
         try {
-          console.log("Converting VCM type to template:", vcmType.id)
+          console.log("VCMタイプを変換中:", vcmType.id)
           const template = this.convertVCMTypeToTemplate(vcmType)
           syncedTemplates.push(template)
+          console.log("変換完了:", template.id, template.name)
         } catch (error) {
-          const errorMsg = `Failed to convert ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`
+          const errorMsg = `${vcmType.name || vcmType.id}の変換に失敗: ${error instanceof Error ? error.message : "不明なエラー"}`
           console.error(errorMsg)
           errors.push(errorMsg)
         }
       }
 
-      // Save synced templates locally
-      console.log("Saving synced templates locally:", syncedTemplates.length)
+      console.log("変換されたテンプレート:", syncedTemplates.length, "件")
+      syncedTemplates.forEach((template) => {
+        console.log(`- ${template.id}: ${template.name} (source: ${template.source})`)
+      })
+
+      // ローカルストレージに保存
+      console.log("ローカルストレージに保存中...")
       this.saveSyncedTemplates(syncedTemplates)
 
-      // Update last sync time
-      console.log("Updating last sync time")
+      // 最終同期時刻を更新
+      console.log("最終同期時刻を更新中...")
       VCMConfigManager.updateLastSync()
 
-      // Sync templates to server
+      // サーバーに同期
       try {
-        console.log("Syncing templates to server...")
+        console.log("サーバーに同期中...")
         const allTemplates = await this.getAllTemplates()
+        console.log("サーバーに送信するテンプレート:", allTemplates.length, "件")
+
         const response = await fetch("/api/vcm/sync-templates", {
           method: "POST",
           headers: {
@@ -183,27 +206,31 @@ export class CredentialTemplateManager {
 
         if (response.ok) {
           const result = await response.json()
-          console.log("Server sync successful:", result)
+          console.log("サーバー同期成功:", result)
         } else {
-          console.error("Server sync failed:", response.status, response.statusText)
+          console.error("サーバー同期失敗:", response.status, response.statusText)
           errors.push("サーバーへの同期に失敗しました")
         }
       } catch (serverSyncError) {
-        console.error("Error syncing to server:", serverSyncError)
+        console.error("サーバー同期エラー:", serverSyncError)
         errors.push("サーバーへの同期でエラーが発生しました")
       }
 
       // キャッシュを無効化
       this.cachedTemplates = null
 
-      return {
+      const result = {
         success: errors.length === 0,
         synced: syncedTemplates.length,
         errors,
         templates: syncedTemplates,
       }
+
+      console.log("=== 同期完了 ===")
+      console.log("結果:", result)
+      return result
     } catch (error) {
-      console.error("VCM sync error:", error)
+      console.error("=== VCM同期エラー ===", error)
       return {
         success: false,
         synced: 0,
