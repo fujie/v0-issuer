@@ -9,6 +9,63 @@ function debugLog(message: string, data?: any) {
   }
 }
 
+// VCMレスポンスの詳細ログ
+function logVCMResponse(response: Response, responseText: string, parsedData?: any, parseError?: any) {
+  console.log("=== VCM API Response Details ===")
+  console.log(`Status: ${response.status} ${response.statusText}`)
+  console.log(`URL: ${response.url}`)
+  console.log("Headers:")
+  response.headers.forEach((value, key) => {
+    console.log(`  ${key}: ${value}`)
+  })
+  console.log(`Response Size: ${responseText.length} characters`)
+  console.log("Raw Response Text:")
+  console.log(responseText)
+
+  if (parseError) {
+    console.log("JSON Parse Error:")
+    console.log(parseError)
+  } else if (parsedData) {
+    console.log("Parsed JSON Data:")
+    console.log(JSON.stringify(parsedData, null, 2))
+
+    // データ構造の分析
+    console.log("Data Structure Analysis:")
+    if (Array.isArray(parsedData)) {
+      console.log(`- Root is array with ${parsedData.length} items`)
+    } else if (typeof parsedData === "object" && parsedData !== null) {
+      console.log(`- Root is object with keys: ${Object.keys(parsedData).join(", ")}`)
+
+      // よくあるプロパティをチェック
+      if (parsedData.credentialTypes) {
+        console.log(
+          `- credentialTypes: ${Array.isArray(parsedData.credentialTypes) ? `array with ${parsedData.credentialTypes.length} items` : typeof parsedData.credentialTypes}`,
+        )
+      }
+      if (parsedData.data) {
+        console.log(
+          `- data: ${Array.isArray(parsedData.data) ? `array with ${parsedData.data.length} items` : typeof parsedData.data}`,
+        )
+      }
+      if (parsedData.items) {
+        console.log(
+          `- items: ${Array.isArray(parsedData.items) ? `array with ${parsedData.items.length} items` : typeof parsedData.items}`,
+        )
+      }
+      if (parsedData.success !== undefined) {
+        console.log(`- success: ${parsedData.success}`)
+      }
+      if (parsedData.error) {
+        console.log(`- error: ${parsedData.error}`)
+      }
+      if (parsedData.message) {
+        console.log(`- message: ${parsedData.message}`)
+      }
+    }
+  }
+  console.log("================================")
+}
+
 // リクエスト詳細を記録する関数
 function logRequestDetails(request: NextRequest, params: URLSearchParams) {
   debugLog("=== VCM Credential Types API Request ===")
@@ -16,17 +73,6 @@ function logRequestDetails(request: NextRequest, params: URLSearchParams) {
   debugLog(`URL: ${request.url}`)
   debugLog(`Headers:`, Object.fromEntries(request.headers.entries()))
   debugLog(`Query Parameters:`, Object.fromEntries(params.entries()))
-  debugLog("==========================================")
-}
-
-// レスポンス詳細を記録する関数
-function logResponseDetails(status: number, data: any, error?: any) {
-  debugLog("=== VCM Credential Types API Response ===")
-  debugLog(`Status: ${status}`)
-  debugLog(`Response Data:`, data)
-  if (error) {
-    debugLog(`Error:`, error)
-  }
   debugLog("==========================================")
 }
 
@@ -84,74 +130,12 @@ const MOCK_CREDENTIAL_TYPES = [
       textColor: "#ffffff",
     },
     issuanceConfig: {
-      validityPeriod: 1460, // 4年
+      validityPeriod: 1460,
       issuer: "https://university.example.com",
       context: ["https://www.w3.org/2018/credentials/v1"],
       type: ["VerifiableCredential", "StudentIDCredential"],
       revocable: true,
       batchIssuance: false,
-    },
-    createdAt: "2024-01-01T00:00:00Z",
-    updatedAt: "2024-01-01T00:00:00Z",
-  },
-  {
-    id: "academic-transcript",
-    name: "成績証明書",
-    description: "学業成績の証明書",
-    version: "1.0.0",
-    status: "active",
-    schema: {
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "object",
-      properties: {
-        studentId: {
-          type: "string",
-          title: "学籍番号",
-          description: "学生の学籍番号",
-          selectiveDisclosure: false,
-        },
-        fullName: {
-          type: "string",
-          title: "氏名",
-          description: "学生の氏名",
-          selectiveDisclosure: true,
-        },
-        gpa: {
-          type: "number",
-          title: "GPA",
-          description: "累積GPA",
-          selectiveDisclosure: true,
-        },
-        totalCredits: {
-          type: "integer",
-          title: "取得単位数",
-          description: "取得した総単位数",
-          selectiveDisclosure: true,
-        },
-        courses: {
-          type: "array",
-          title: "履修科目",
-          description: "履修した科目一覧",
-          selectiveDisclosure: true,
-        },
-      },
-      required: ["studentId", "fullName"],
-      additionalProperties: false,
-    },
-    display: {
-      name: "成績証明書",
-      description: "学業成績の証明書",
-      locale: "ja-JP",
-      backgroundColor: "#059669",
-      textColor: "#ffffff",
-    },
-    issuanceConfig: {
-      validityPeriod: 365,
-      issuer: "https://university.example.com",
-      context: ["https://www.w3.org/2018/credentials/v1"],
-      type: ["VerifiableCredential", "AcademicTranscriptCredential"],
-      revocable: false,
-      batchIssuance: true,
     },
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -194,7 +178,7 @@ export async function GET(request: NextRequest) {
         },
       }
 
-      logResponseDetails(400, errorResponse)
+      debugLog("Parameter validation failed", errorResponse)
       return NextResponse.json(errorResponse, { status: 400 })
     }
 
@@ -215,7 +199,6 @@ export async function GET(request: NextRequest) {
         },
       }
 
-      logResponseDetails(200, mockResponse)
       return NextResponse.json(mockResponse)
     }
 
@@ -228,80 +211,214 @@ export async function GET(request: NextRequest) {
       "X-API-Key": apiKey,
       Authorization: `Bearer ${apiKey}`,
       "User-Agent": "Student-Login-Site/1.0",
+      Accept: "application/json",
     }
 
-    debugLog("VCM Request Details:", {
-      endpoint: vcmEndpoint,
-      headers: {
-        ...requestHeaders,
-        "X-API-Key": `${apiKey.substring(0, 8)}...`,
-        Authorization: `Bearer ${apiKey.substring(0, 8)}...`,
-      },
-      method: "GET",
+    console.log("=== VCM Request Details ===")
+    console.log(`Endpoint: ${vcmEndpoint}`)
+    console.log(`Method: GET`)
+    console.log("Headers:")
+    Object.entries(requestHeaders).forEach(([key, value]) => {
+      if (key.includes("Key") || key.includes("Authorization")) {
+        console.log(`  ${key}: ${value.substring(0, 8)}...`)
+      } else {
+        console.log(`  ${key}: ${value}`)
+      }
     })
+    console.log("===========================")
 
     const vcmRequestStart = Date.now()
-
-    let vcmResponse: Response
-    let vcmData: any
-    let connectionError: any = null
 
     try {
       debugLog(`Making request to VCM: ${vcmEndpoint}`)
 
-      vcmResponse = await fetch(vcmEndpoint, {
+      const vcmResponse = await fetch(vcmEndpoint, {
         method: "GET",
         headers: requestHeaders,
-        signal: AbortSignal.timeout(10000), // 10秒タイムアウト
+        signal: AbortSignal.timeout(15000), // 15秒タイムアウト
       })
 
       const vcmResponseTime = Date.now() - vcmRequestStart
 
-      debugLog("VCM Response received:", {
-        status: vcmResponse.status,
-        statusText: vcmResponse.statusText,
-        headers: Object.fromEntries(vcmResponse.headers.entries()),
-        responseTime: vcmResponseTime,
-      })
+      // レスポンステキストを取得
+      const responseText = await vcmResponse.text()
 
-      if (!vcmResponse.ok) {
-        const errorText = await vcmResponse.text()
-        debugLog("VCM Response Error Text:", errorText)
+      // VCMレスポンスの詳細ログ
+      let parsedData: any = null
+      let parseError: any = null
 
-        throw new Error(`VCM API returned ${vcmResponse.status}: ${vcmResponse.statusText}. Response: ${errorText}`)
+      try {
+        parsedData = JSON.parse(responseText)
+      } catch (error) {
+        parseError = error
       }
 
-      vcmData = await vcmResponse.json()
-      debugLog("VCM Response Data:", vcmData)
+      // 詳細なレスポンスログを出力
+      logVCMResponse(vcmResponse, responseText, parsedData, parseError)
+
+      if (!vcmResponse.ok) {
+        debugLog(`VCM API returned error status: ${vcmResponse.status}`)
+
+        // エラーレスポンスでもフォールバック
+        const fallbackResponse = {
+          success: true,
+          credentialTypes: MOCK_CREDENTIAL_TYPES,
+          mode: "fallback-error",
+          debugInfo: {
+            source: "fallback-after-http-error",
+            originalHttpStatus: vcmResponse.status,
+            originalHttpStatusText: vcmResponse.statusText,
+            originalResponseText: responseText,
+            originalParsedData: parsedData,
+            originalParseError: parseError?.message,
+            attemptedEndpoint: vcmEndpoint,
+            count: MOCK_CREDENTIAL_TYPES.length,
+            timestamp: new Date().toISOString(),
+            responseTime: Date.now() - startTime,
+            vcmResponseTime,
+            requestId: `req_${Date.now()}`,
+          },
+          errorDetails: {
+            type: "VCM_HTTP_ERROR",
+            httpStatus: vcmResponse.status,
+            httpStatusText: vcmResponse.statusText,
+            responseText: responseText,
+            parsedData: parsedData,
+            parseError: parseError?.message,
+            connectionDetails: {
+              endpoint: vcmEndpoint,
+              method: "GET",
+              headers: {
+                ...requestHeaders,
+                "X-API-Key": `${apiKey.substring(0, 8)}...`,
+                Authorization: `Bearer ${apiKey.substring(0, 8)}...`,
+              },
+            },
+            responseTime: vcmResponseTime,
+          },
+        }
+
+        return NextResponse.json(fallbackResponse)
+      }
+
+      // パースエラーの場合
+      if (parseError) {
+        debugLog("Failed to parse VCM response as JSON")
+
+        const fallbackResponse = {
+          success: true,
+          credentialTypes: MOCK_CREDENTIAL_TYPES,
+          mode: "fallback-parse-error",
+          debugInfo: {
+            source: "fallback-after-parse-error",
+            originalResponseText: responseText,
+            parseError: parseError.message,
+            attemptedEndpoint: vcmEndpoint,
+            count: MOCK_CREDENTIAL_TYPES.length,
+            timestamp: new Date().toISOString(),
+            responseTime: Date.now() - startTime,
+            vcmResponseTime,
+            requestId: `req_${Date.now()}`,
+          },
+          errorDetails: {
+            type: "VCM_PARSE_ERROR",
+            responseText: responseText,
+            parseError: parseError.message,
+            responseSize: responseText.length,
+          },
+        }
+
+        return NextResponse.json(fallbackResponse)
+      }
+
+      // VCM接続成功 - データ抽出
+      let credentialTypes: any[] = []
+
+      if (Array.isArray(parsedData)) {
+        credentialTypes = parsedData
+        debugLog("VCM response is a direct array")
+      } else if (parsedData && typeof parsedData === "object") {
+        if (parsedData.credentialTypes && Array.isArray(parsedData.credentialTypes)) {
+          credentialTypes = parsedData.credentialTypes
+          debugLog("Found credentialTypes array in response")
+        } else if (parsedData.data && Array.isArray(parsedData.data)) {
+          credentialTypes = parsedData.data
+          debugLog("Found data array in response")
+        } else if (parsedData.items && Array.isArray(parsedData.items)) {
+          credentialTypes = parsedData.items
+          debugLog("Found items array in response")
+        } else {
+          debugLog("No recognizable array found in VCM response, using empty array")
+          credentialTypes = []
+        }
+      } else {
+        debugLog("VCM response is not an object or array, using empty array")
+        credentialTypes = []
+      }
+
+      debugLog(`Extracted ${credentialTypes.length} credential types from VCM response`)
+
+      const successResponse = {
+        success: true,
+        credentialTypes,
+        mode: "vcm",
+        debugInfo: {
+          source: "vcm-server",
+          endpoint: vcmEndpoint,
+          count: credentialTypes.length,
+          timestamp: new Date().toISOString(),
+          responseTime: Date.now() - startTime,
+          vcmResponseTime,
+          requestId: `req_${Date.now()}`,
+          vcmResponseDetails: {
+            httpStatus: vcmResponse.status,
+            httpStatusText: vcmResponse.statusText,
+            responseSize: responseText.length,
+            isArray: Array.isArray(parsedData),
+            hasCredentialTypes: !!parsedData?.credentialTypes,
+            hasData: !!parsedData?.data,
+            hasItems: !!parsedData?.items,
+            rootKeys: parsedData && typeof parsedData === "object" ? Object.keys(parsedData) : [],
+            originalResponse: parsedData, // 完全なレスポンスデータ
+          },
+        },
+      }
+
+      return NextResponse.json(successResponse)
     } catch (fetchError) {
-      connectionError = fetchError
-      debugLog("VCM Connection Error:", {
-        error: fetchError instanceof Error ? fetchError.message : String(fetchError),
-        stack: fetchError instanceof Error ? fetchError.stack : undefined,
-        endpoint: vcmEndpoint,
-        responseTime: Date.now() - vcmRequestStart,
-      })
+      const vcmResponseTime = Date.now() - vcmRequestStart
+
+      console.log("=== VCM Connection Error ===")
+      console.log(`Error: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`)
+      console.log(`Error Type: ${fetchError instanceof Error ? fetchError.constructor.name : typeof fetchError}`)
+      if (fetchError instanceof Error && fetchError.stack) {
+        console.log(`Stack: ${fetchError.stack}`)
+      }
+      console.log(`Endpoint: ${vcmEndpoint}`)
+      console.log(`Response Time: ${vcmResponseTime}ms`)
+      console.log("============================")
 
       // フォールバック: モックデータを返す
-      debugLog("Falling back to mock data due to VCM connection error")
-
       const fallbackResponse = {
         success: true,
         credentialTypes: MOCK_CREDENTIAL_TYPES,
-        mode: "fallback-mock",
+        mode: "fallback-connection-error",
         debugInfo: {
-          source: "fallback-after-error",
+          source: "fallback-after-connection-error",
           originalError: fetchError instanceof Error ? fetchError.message : String(fetchError),
+          errorType: fetchError instanceof Error ? fetchError.constructor.name : typeof fetchError,
+          errorStack: fetchError instanceof Error ? fetchError.stack : undefined,
           attemptedEndpoint: vcmEndpoint,
           count: MOCK_CREDENTIAL_TYPES.length,
           timestamp: new Date().toISOString(),
           responseTime: Date.now() - startTime,
+          vcmResponseTime,
           requestId: `req_${Date.now()}`,
         },
         errorDetails: {
           type: "VCM_CONNECTION_ERROR",
-          httpStatus: vcmResponse?.status,
           errorMessage: fetchError instanceof Error ? fetchError.message : String(fetchError),
+          errorType: fetchError instanceof Error ? fetchError.constructor.name : typeof fetchError,
           connectionDetails: {
             endpoint: vcmEndpoint,
             method: "GET",
@@ -311,62 +428,29 @@ export async function GET(request: NextRequest) {
               Authorization: `Bearer ${apiKey.substring(0, 8)}...`,
             },
           },
-          responseTime: Date.now() - vcmRequestStart,
+          responseTime: vcmResponseTime,
           troubleshooting: [
             "VCMサーバーが起動していることを確認してください",
             "ネットワーク接続を確認してください",
             "API Keyが正しいことを確認してください",
             "VCMサーバーのログを確認してください",
+            "ファイアウォール設定を確認してください",
             "デモモードの使用を検討してください",
           ],
         },
       }
 
-      logResponseDetails(200, fallbackResponse, connectionError)
       return NextResponse.json(fallbackResponse)
     }
-
-    // VCM接続成功
-    let credentialTypes: any[] = []
-
-    if (Array.isArray(vcmData)) {
-      credentialTypes = vcmData
-    } else if (vcmData.credentialTypes && Array.isArray(vcmData.credentialTypes)) {
-      credentialTypes = vcmData.credentialTypes
-    } else if (vcmData.data && Array.isArray(vcmData.data)) {
-      credentialTypes = vcmData.data
-    } else if (vcmData.items && Array.isArray(vcmData.items)) {
-      credentialTypes = vcmData.items
-    } else {
-      debugLog("Unexpected VCM response format, using empty array:", vcmData)
-      credentialTypes = []
-    }
-
-    const successResponse = {
-      success: true,
-      credentialTypes,
-      mode: "vcm",
-      debugInfo: {
-        source: "vcm-server",
-        endpoint: vcmEndpoint,
-        count: credentialTypes.length,
-        timestamp: new Date().toISOString(),
-        responseTime: Date.now() - startTime,
-        vcmResponseTime: Date.now() - vcmRequestStart,
-        requestId: `req_${Date.now()}`,
-        vcmResponseFormat: {
-          isArray: Array.isArray(vcmData),
-          hasCredentialTypes: !!vcmData.credentialTypes,
-          hasData: !!vcmData.data,
-          hasItems: !!vcmData.items,
-          keys: Object.keys(vcmData),
-        },
-      },
-    }
-
-    logResponseDetails(200, successResponse)
-    return NextResponse.json(successResponse)
   } catch (error) {
+    console.log("=== API Internal Error ===")
+    console.log(`Error: ${error instanceof Error ? error.message : String(error)}`)
+    console.log(`Error Type: ${error instanceof Error ? error.constructor.name : typeof error}`)
+    if (error instanceof Error && error.stack) {
+      console.log(`Stack: ${error.stack}`)
+    }
+    console.log("==========================")
+
     const errorResponse = {
       success: false,
       error: "Failed to fetch credential types",
@@ -380,7 +464,42 @@ export async function GET(request: NextRequest) {
       },
     }
 
-    logResponseDetails(500, errorResponse, error)
     return NextResponse.json(errorResponse, { status: 500 })
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { baseUrl, apiKey, useMockData } = body
+
+    debugLog("POST request received", {
+      baseUrl,
+      apiKey: apiKey ? `${apiKey.substring(0, 8)}...` : null,
+      useMockData,
+    })
+
+    // GETと同じロジックを使用するため、URLパラメータに変換
+    const url = new URL(request.url)
+    url.searchParams.set("baseUrl", baseUrl)
+    url.searchParams.set("apiKey", apiKey)
+    url.searchParams.set("useMockData", useMockData?.toString() || "false")
+
+    const getRequest = new Request(url.toString(), {
+      method: "GET",
+      headers: request.headers,
+    })
+
+    return GET(getRequest as NextRequest)
+  } catch (error) {
+    debugLog("POST request error", error)
+    return NextResponse.json(
+      {
+        success: false,
+        message: "クレデンシャルタイプの取得中にエラーが発生しました",
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }
