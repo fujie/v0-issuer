@@ -60,6 +60,7 @@ export class ServerMetadataGenerator {
 
       // VCMテンプレートを環境変数から取得（もしあれば）
       const vcmTemplates = this.getVCMTemplatesFromEnv()
+      console.log("ServerMetadataGenerator: VCM templates from env:", vcmTemplates.length)
 
       // 全テンプレートを結合
       const allTemplates = [...staticTemplates, ...vcmTemplates]
@@ -75,6 +76,7 @@ export class ServerMetadataGenerator {
           let configurationId: string
           if (template.source === "vcm") {
             configurationId = template.id
+            console.log(`ServerMetadataGenerator: Using VCM template ID as configuration ID: ${configurationId}`)
           } else {
             // 静的テンプレートのマッピング
             const staticMapping: Record<string, string> = {
@@ -83,6 +85,7 @@ export class ServerMetadataGenerator {
               "graduation-certificate": "GraduationCertificate",
             }
             configurationId = staticMapping[template.id] || template.id
+            console.log(`ServerMetadataGenerator: Mapped static template ID ${template.id} to ${configurationId}`)
           }
 
           metadata.credential_configurations_supported[configurationId] = configuration
@@ -96,6 +99,7 @@ export class ServerMetadataGenerator {
 
       // VCMテンプレートが環境変数にない場合は、デフォルトのVCMテンプレートを追加
       if (vcmTemplates.length === 0) {
+        console.log("ServerMetadataGenerator: No VCM templates found, adding default VCM templates")
         this.addDefaultVCMTemplates(metadata)
       }
 
@@ -113,21 +117,49 @@ export class ServerMetadataGenerator {
 
   private static getVCMTemplatesFromEnv(): EnhancedCredentialTemplate[] {
     try {
+      // 環境変数からVCM設定を取得
       const vcmConfigStr = process.env.VCM_CONFIG
       if (!vcmConfigStr) {
         console.log("ServerMetadataGenerator: No VCM_CONFIG environment variable found")
         return []
       }
 
-      const vcmConfig = JSON.parse(vcmConfigStr)
-      if (vcmConfig.syncedTemplates && Array.isArray(vcmConfig.syncedTemplates)) {
-        console.log("ServerMetadataGenerator: Found VCM templates in env:", vcmConfig.syncedTemplates.length)
-        return vcmConfig.syncedTemplates
+      console.log("ServerMetadataGenerator: Found VCM_CONFIG environment variable")
+
+      try {
+        // JSON解析
+        const vcmConfig = JSON.parse(vcmConfigStr)
+        console.log("ServerMetadataGenerator: Parsed VCM_CONFIG:", JSON.stringify(vcmConfig, null, 2))
+
+        if (vcmConfig.syncedTemplates && Array.isArray(vcmConfig.syncedTemplates)) {
+          console.log("ServerMetadataGenerator: Found synced templates:", vcmConfig.syncedTemplates.length)
+
+          // テンプレートを適切な形式に変換
+          return vcmConfig.syncedTemplates.map((template: any) => {
+            // テンプレートのソースを明示的に設定
+            return {
+              ...template,
+              source: "vcm",
+              // 必要なプロパティが存在することを確認
+              display: template.display || {
+                name: template.name || template.id,
+                locale: "ja-JP",
+                backgroundColor: template.backgroundColor || "#1e40af",
+                textColor: template.textColor || "#ffffff",
+              },
+              claims: template.claims || [],
+            }
+          })
+        } else {
+          console.log("ServerMetadataGenerator: No syncedTemplates found in VCM_CONFIG")
+        }
+      } catch (parseError) {
+        console.error("ServerMetadataGenerator: Error parsing VCM_CONFIG JSON:", parseError)
       }
 
       return []
     } catch (error) {
-      console.error("ServerMetadataGenerator: Error parsing VCM_CONFIG:", error)
+      console.error("ServerMetadataGenerator: Error getting VCM templates from env:", error)
       return []
     }
   }
@@ -214,17 +246,21 @@ export class ServerMetadataGenerator {
     // クレームをOpenID4VCI形式に変換
     const claims: Record<string, any> = {}
 
-    template.claims.forEach((claim) => {
-      claims[claim.key] = {
-        display: [
-          {
-            name: claim.name,
-            locale: template.display.locale || "ja-JP",
-          },
-        ],
-        mandatory: claim.required,
-      }
-    })
+    if (Array.isArray(template.claims)) {
+      template.claims.forEach((claim) => {
+        claims[claim.key] = {
+          display: [
+            {
+              name: claim.name,
+              locale: template.display?.locale || "ja-JP",
+            },
+          ],
+          mandatory: claim.required,
+        }
+      })
+    } else {
+      console.warn(`ServerMetadataGenerator: Template ${template.id} has no claims array`)
+    }
 
     const configuration: OpenID4VCICredentialConfiguration = {
       format: "vc+sd-jwt",
@@ -233,14 +269,14 @@ export class ServerMetadataGenerator {
       credential_signing_alg_values_supported: ["ES256"],
       display: [
         {
-          name: template.display.name,
-          locale: template.display.locale || "ja-JP",
-          background_color: template.display.backgroundColor || "#1e40af",
-          text_color: template.display.textColor || "#ffffff",
-          ...(template.display.logo && {
+          name: template.display?.name || template.id,
+          locale: template.display?.locale || "ja-JP",
+          background_color: template.display?.backgroundColor || "#1e40af",
+          text_color: template.display?.textColor || "#ffffff",
+          ...(template.display?.logo && {
             logo: {
               url: template.display.logo.url || "",
-              alt_text: template.display.logo.alt_text || template.display.name,
+              alt_text: template.display.logo.alt_text || template.display?.name || template.id,
             },
           }),
         },

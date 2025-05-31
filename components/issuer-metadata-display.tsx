@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Copy, Check, RefreshCw } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 import { CredentialTemplateManager, type EnhancedCredentialTemplate } from "@/lib/credential-templates-enhanced"
 
 interface OpenID4VCICredentialConfiguration {
@@ -48,6 +50,16 @@ export function IssuerMetadataDisplay() {
   const [metadata, setMetadata] = useState<IssuerMetadata | null>(null)
   const [loading, setLoading] = useState(true)
   const [templates, setTemplates] = useState<EnhancedCredentialTemplate[]>([])
+  const [showVCM, setShowVCM] = useState(true)
+  const [showStatic, setShowStatic] = useState(true)
+  const [endpointStatus, setEndpointStatus] = useState<{
+    loading: boolean
+    success?: boolean
+    message?: string
+    data?: any
+  }>({
+    loading: false,
+  })
 
   const generateMetadata = async () => {
     setLoading(true)
@@ -71,8 +83,13 @@ export function IssuerMetadataDisplay() {
         credential_configurations_supported: {},
       }
 
+      // フィルタリングされたテンプレート
+      const filteredTemplates = allTemplates.filter(
+        (t) => (t.source === "vcm" && showVCM) || (t.source === "static" && showStatic),
+      )
+
       // 各テンプレートをOpenID4VCI形式に変換
-      for (const template of allTemplates) {
+      for (const template of filteredTemplates) {
         try {
           const configuration = convertTemplateToConfiguration(template)
 
@@ -189,7 +206,7 @@ export function IssuerMetadataDisplay() {
 
   useEffect(() => {
     generateMetadata()
-  }, [])
+  }, [showVCM, showStatic])
 
   const copyToClipboard = () => {
     if (metadata) {
@@ -201,6 +218,140 @@ export function IssuerMetadataDisplay() {
 
   const refreshMetadata = () => {
     generateMetadata()
+  }
+
+  const testEndpoint = async () => {
+    setEndpointStatus({ loading: true })
+    try {
+      console.log("Testing /.well-known/openid-credential-issuer endpoint...")
+
+      const response = await fetch("/.well-known/openid-credential-issuer", {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      })
+
+      console.log("Response status:", response.status)
+      console.log("Response headers:", Object.fromEntries(response.headers.entries()))
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("Error response:", errorText)
+
+        setEndpointStatus({
+          loading: false,
+          success: false,
+          message: `HTTP ${response.status}: エンドポイントが見つからないか、エラーが発生しました`,
+          data: {
+            status: response.status,
+            statusText: response.statusText,
+            body: errorText.substring(0, 500) + (errorText.length > 500 ? "..." : ""),
+          },
+        })
+        return
+      }
+
+      const contentType = response.headers.get("content-type")
+      console.log("Content-Type:", contentType)
+
+      if (!contentType || !contentType.includes("application/json")) {
+        const textResponse = await response.text()
+        console.error("Non-JSON response:", textResponse.substring(0, 200))
+
+        setEndpointStatus({
+          loading: false,
+          success: false,
+          message: "エンドポイントからJSONではないレスポンスが返されました（おそらく404エラーページ）",
+          data: {
+            contentType,
+            body: textResponse.substring(0, 500) + (textResponse.length > 500 ? "..." : ""),
+          },
+        })
+        return
+      }
+
+      const data = await response.json()
+      console.log("Successfully parsed JSON response")
+
+      // credential_configurations_supportedの数を確認
+      const configCount = Object.keys(data.credential_configurations_supported || {}).length
+
+      setEndpointStatus({
+        loading: false,
+        success: true,
+        message: `エンドポイントから正常にメタデータを取得しました（${configCount}個のcredential configurations）`,
+        data,
+      })
+    } catch (error) {
+      console.error("Error testing endpoint:", error)
+
+      let errorMessage = "不明なエラー"
+      if (error instanceof Error) {
+        if (error.message.includes("JSON")) {
+          errorMessage = "レスポンスのJSONパースに失敗しました（HTMLページが返された可能性があります）"
+        } else if (error.message.includes("fetch")) {
+          errorMessage = "ネットワークエラーまたはエンドポイントにアクセスできません"
+        } else {
+          errorMessage = error.message
+        }
+      }
+
+      setEndpointStatus({
+        loading: false,
+        success: false,
+        message: `エラー: ${errorMessage}`,
+      })
+    }
+  }
+
+  const testAlternativeEndpoints = async () => {
+    setEndpointStatus({ loading: true })
+
+    const endpoints = [
+      "/.well-known/openid-credential-issuer",
+      "/api/credential-issuer/.well-known/openid-credential-issuer",
+      "/api/credential-issuer/metadata",
+      "/api/well-known/openid-credential-issuer",
+    ]
+
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Testing endpoint: ${endpoint}`)
+
+        const response = await fetch(endpoint, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        })
+
+        if (response.ok) {
+          const contentType = response.headers.get("content-type")
+          if (contentType && contentType.includes("application/json")) {
+            const data = await response.json()
+            const configCount = Object.keys(data.credential_configurations_supported || {}).length
+
+            setEndpointStatus({
+              loading: false,
+              success: true,
+              message: `${endpoint} から正常にメタデータを取得しました（${configCount}個のcredential configurations）`,
+              data,
+            })
+            return
+          }
+        }
+      } catch (error) {
+        console.log(`Failed to test ${endpoint}:`, error)
+      }
+    }
+
+    setEndpointStatus({
+      loading: false,
+      success: false,
+      message: "すべてのエンドポイントでメタデータの取得に失敗しました",
+    })
   }
 
   if (loading) {
@@ -244,55 +395,101 @@ export function IssuerMetadataDisplay() {
         <CardTitle>Issuer Metadata</CardTitle>
         <CardDescription>
           OpenID4VCI準拠のIssuer Metadata情報です。
-          {staticTemplates.length}個の静的テンプレートと{vcmTemplates.length}個のVCMテンプレートが含まれています。
+          {showStatic && staticTemplates.length > 0 && `${staticTemplates.length}個の静的テンプレート`}
+          {showStatic && showVCM && staticTemplates.length > 0 && vcmTemplates.length > 0 && "と"}
+          {showVCM && vcmTemplates.length > 0 && `${vcmTemplates.length}個のVCMテンプレート`}
+          が含まれています。
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="flex justify-end gap-2 mb-4">
-          <Button variant="outline" size="sm" onClick={refreshMetadata} className="flex items-center gap-1">
-            <RefreshCw className="h-4 w-4" />
-            更新
-          </Button>
-          <Button variant="outline" size="sm" onClick={copyToClipboard} className="flex items-center gap-1">
-            {copied ? (
-              <>
-                <Check className="h-4 w-4" />
-                コピーしました
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" />
-                JSONをコピー
-              </>
-            )}
-          </Button>
-        </div>
-
-        <div className="mb-4 p-3 bg-blue-50 rounded-md">
-          <h4 className="font-medium text-sm mb-2">含まれるCredential Configurations:</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-            {configurationIds.map((id) => {
-              const template = templates.find((t) =>
-                t.source === "vcm"
-                  ? t.id === id
-                  : (t.id === "university-student-id" && id === "UniversityStudentCredential") ||
-                    (t.id === "academic-transcript" && id === "AcademicTranscript") ||
-                    (t.id === "graduation-certificate" && id === "GraduationCertificate"),
-              )
-              return (
-                <div key={id} className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-1 rounded text-xs ${
-                      template?.source === "vcm" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"
-                    }`}
-                  >
-                    {template?.source === "vcm" ? "VCM" : "静的"}
-                  </span>
-                  <span className="font-mono">{id}</span>
-                </div>
-              )
-            })}
+        <div className="flex flex-col gap-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <Switch id="show-vcm" checked={showVCM} onCheckedChange={setShowVCM} />
+                <Label htmlFor="show-vcm">VCMテンプレート</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch id="show-static" checked={showStatic} onCheckedChange={setShowStatic} />
+                <Label htmlFor="show-static">静的テンプレート</Label>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={refreshMetadata} className="flex items-center gap-1">
+                <RefreshCw className="h-4 w-4" />
+                更新
+              </Button>
+              <Button variant="outline" size="sm" onClick={copyToClipboard} className="flex items-center gap-1">
+                {copied ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    コピーしました
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4" />
+                    JSONをコピー
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
+
+          <div className="mb-4 p-3 bg-blue-50 rounded-md">
+            <h4 className="font-medium text-sm mb-2">含まれるCredential Configurations:</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              {configurationIds.map((id) => {
+                const template = templates.find((t) =>
+                  t.source === "vcm"
+                    ? t.id === id
+                    : (t.id === "university-student-id" && id === "UniversityStudentCredential") ||
+                      (t.id === "academic-transcript" && id === "AcademicTranscript") ||
+                      (t.id === "graduation-certificate" && id === "GraduationCertificate"),
+                )
+                return (
+                  <div key={id} className="flex items-center gap-2">
+                    <span
+                      className={`px-2 py-1 rounded text-xs ${
+                        template?.source === "vcm" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"
+                      }`}
+                    >
+                      {template?.source === "vcm" ? "VCM" : "静的"}
+                    </span>
+                    <span className="font-mono">{id}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="mb-4 flex gap-2">
+            <Button variant="secondary" size="sm" onClick={testEndpoint} disabled={endpointStatus.loading}>
+              {endpointStatus.loading ? "テスト中..." : "標準エンドポイントをテスト"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={testAlternativeEndpoints} disabled={endpointStatus.loading}>
+              {endpointStatus.loading ? "テスト中..." : "代替エンドポイントをテスト"}
+            </Button>
+          </div>
+
+          {endpointStatus.message && (
+            <div
+              className={`mt-2 p-2 rounded text-sm ${
+                endpointStatus.success ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"
+              }`}
+            >
+              {endpointStatus.message}
+              {endpointStatus.data && (
+                <div className="mt-2">
+                  <details>
+                    <summary className="cursor-pointer font-medium">エンドポイントのレスポンス</summary>
+                    <pre className="mt-2 bg-gray-100 p-2 rounded-md overflow-auto max-h-40 text-xs">
+                      {JSON.stringify(endpointStatus.data, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <Tabs defaultValue="full">
