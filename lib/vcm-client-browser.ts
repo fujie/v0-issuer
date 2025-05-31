@@ -1,4 +1,5 @@
-// Browser-safe VCM Client that uses API routes
+// 完全にブラウザ専用のVCMクライアント - サーバーサイドでは使用しない
+
 export interface VCMConfig {
   baseUrl: string
   apiKey: string
@@ -10,58 +11,13 @@ export interface VCMCredentialType {
   name: string
   description: string
   version: string
-  schema: VCMSchema
-  display: VCMDisplayProperties
-  issuanceConfig: VCMIssuanceConfig
+  schema: any
+  display: any
+  issuanceConfig: any
   createdAt: string
   updatedAt: string
   status: "active" | "draft" | "deprecated"
   organizationId?: string
-}
-
-export interface VCMSchema {
-  $schema: string
-  type: "object"
-  properties: Record<string, VCMSchemaProperty>
-  required: string[]
-  additionalProperties: boolean
-}
-
-export interface VCMSchemaProperty {
-  type: string
-  title: string
-  description: string
-  format?: string
-  enum?: string[]
-  selectiveDisclosure?: boolean
-  required?: boolean
-  default?: any
-  pattern?: string
-  minLength?: number
-  maxLength?: number
-}
-
-export interface VCMDisplayProperties {
-  name: string
-  description: string
-  locale: string
-  backgroundColor?: string
-  textColor?: string
-  logo?: {
-    url: string
-    altText: string
-  }
-}
-
-export interface VCMIssuanceConfig {
-  validityPeriod: number
-  issuer: string
-  context: string[]
-  type: string[]
-  revocable: boolean
-  batchIssuance: boolean
-  signingAlgorithm?: string
-  keyId?: string
 }
 
 export interface VCMIntegration {
@@ -82,6 +38,11 @@ export class VCMBrowserClient {
   private useMockData: boolean
 
   constructor(config: VCMConfig, useMockData = false) {
+    // ブラウザ環境でのみ動作することを確認
+    if (typeof window === "undefined") {
+      throw new Error("VCMBrowserClient can only be used in browser environment")
+    }
+
     this.config = config
     this.useMockData = useMockData
   }
@@ -112,18 +73,12 @@ export class VCMBrowserClient {
         }),
       })
 
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
       const result = await response.json()
       console.log("Test connection result:", result)
-
-      // Log additional details for debugging
-      if (!result.success) {
-        console.error("Connection test failed:", {
-          statusCode: result.statusCode,
-          endpoint: result.endpoint,
-          error: result.error,
-          troubleshooting: result.troubleshooting,
-        })
-      }
 
       return result
     } catch (error) {
@@ -158,6 +113,12 @@ export class VCMBrowserClient {
           "Content-Type": "application/json",
         },
       })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("API response error:", response.status, errorText)
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
 
       const result = await response.json()
       console.log("Get credential types result:", result)
@@ -197,6 +158,11 @@ export class VCMBrowserClient {
         }),
       })
 
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
       const result = await response.json()
       console.log("Register integration result:", result)
 
@@ -208,142 +174,6 @@ export class VCMBrowserClient {
     } catch (error) {
       console.error("Failed to register integration:", error)
       throw new Error(`統合の登録に失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`)
-    }
-  }
-
-  async syncCredentialTypes(): Promise<{
-    success: boolean
-    synced: number
-    errors: string[]
-    lastSync: string
-  }> {
-    try {
-      console.log(`Syncing credential types from ${this.config.baseUrl} (Mock: ${this.useMockData})`)
-
-      const credentialTypes = await this.getCredentialTypes()
-      const syncResult = {
-        success: true,
-        synced: 0,
-        errors: [] as string[],
-        lastSync: new Date().toISOString(),
-      }
-
-      // Store credential types locally
-      for (const vcmType of credentialTypes) {
-        try {
-          await this.saveLocalCredentialType(vcmType)
-          syncResult.synced++
-        } catch (error) {
-          syncResult.errors.push(
-            `Failed to sync ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`,
-          )
-        }
-      }
-
-      if (syncResult.errors.length > 0) {
-        syncResult.success = false
-      }
-
-      return syncResult
-    } catch (error) {
-      console.error("Failed to sync credential types:", error)
-      return {
-        success: false,
-        synced: 0,
-        errors: [error instanceof Error ? error.message : "同期に失敗しました"],
-        lastSync: new Date().toISOString(),
-      }
-    }
-  }
-
-  private async saveLocalCredentialType(vcmType: VCMCredentialType): Promise<void> {
-    // Convert VCM credential type to local template format
-    const template = this.convertVCMTypeToLocalTemplate(vcmType)
-
-    // Save to local storage
-    const existingTemplates = this.getLocalTemplates()
-    const updatedTemplates = existingTemplates.filter((t) => t.id !== template.id)
-    updatedTemplates.push(template)
-
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("vcm_synced_templates", JSON.stringify(updatedTemplates))
-      } catch (error) {
-        console.error("Failed to save credential type to localStorage:", error)
-      }
-    }
-  }
-
-  private convertVCMTypeToLocalTemplate(vcmType: VCMCredentialType): any {
-    const properties = vcmType.schema?.properties || {}
-    const required = vcmType.schema?.required || []
-
-    const claims = Object.entries(properties).map(([key, property]) => ({
-      key,
-      name: property.title || key,
-      description: property.description || `${key} field`,
-      type: this.mapSchemaTypeToClaimType(property.type, property.format),
-      required: required.includes(key),
-      selectiveDisclosure: property.selectiveDisclosure || false,
-      defaultValue: property.default,
-      enum: property.enum,
-      pattern: property.pattern,
-      minLength: property.minLength,
-      maxLength: property.maxLength,
-    }))
-
-    return {
-      id: vcmType.id,
-      name: vcmType.display?.name || vcmType.name,
-      description: vcmType.display?.description || vcmType.description,
-      type: vcmType.issuanceConfig?.type || ["VerifiableCredential"],
-      context: vcmType.issuanceConfig?.context || ["https://www.w3.org/2018/credentials/v1"],
-      claims,
-      display: {
-        name: vcmType.display?.name || vcmType.name,
-        locale: vcmType.display?.locale || "ja-JP",
-        backgroundColor: vcmType.display?.backgroundColor || "#1e40af",
-        textColor: vcmType.display?.textColor || "#ffffff",
-        logo: vcmType.display?.logo,
-      },
-      validityPeriod: vcmType.issuanceConfig?.validityPeriod || 365,
-      issuer: vcmType.issuanceConfig?.issuer || "https://university.example.com",
-      version: vcmType.version || "1.0.0",
-      status: vcmType.status || "active",
-      source: "vcm" as const,
-      vcmId: vcmType.id,
-      lastSynced: new Date().toISOString(),
-      syncStatus: "synced" as const,
-    }
-  }
-
-  private mapSchemaTypeToClaimType(schemaType: string, format?: string): string {
-    if (format === "date" || format === "date-time") {
-      return "date"
-    }
-
-    switch (schemaType) {
-      case "integer":
-      case "number":
-        return "number"
-      case "boolean":
-        return "boolean"
-      case "string":
-      default:
-        return "string"
-    }
-  }
-
-  private getLocalTemplates(): any[] {
-    if (typeof window === "undefined") {
-      return []
-    }
-
-    try {
-      const stored = localStorage.getItem("vcm_synced_templates")
-      return stored ? JSON.parse(stored) : []
-    } catch {
-      return []
     }
   }
 }

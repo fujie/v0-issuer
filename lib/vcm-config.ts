@@ -37,7 +37,7 @@ export class VCMConfigManager {
         // Ensure default values for new fields
         return {
           webhookSecret: "whisec_lf1jah5h",
-          useMockData: true, // デフォルトでデモモード
+          useMockData: false, // デフォルトで実際のVCM接続を試行
           ...config,
         }
       }
@@ -135,7 +135,7 @@ export class VCMConfigManager {
 
   static getUseMockData(): boolean {
     const config = this.getConfig()
-    return config?.useMockData ?? true // デフォルトでデモモード
+    return config?.useMockData ?? false // デフォルトで実際のVCM接続を試行
   }
 
   static setUseMockData(useMockData: boolean): void {

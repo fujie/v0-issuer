@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import {
-  Settings,
   TestTube,
   CheckCircle,
   XCircle,
@@ -19,18 +18,121 @@ import {
   RefreshCw,
   AlertTriangle,
   Link,
-  Database,
   Webhook,
   Info,
+  Database,
+  Settings,
 } from "lucide-react"
-import { VCMConfigManager, type VCMConnectionConfig, type VCMSyncSettings } from "@/lib/vcm-config"
-import { VCMBrowserClient } from "@/lib/vcm-client-browser"
+
+// 型定義
+interface VCMConnectionConfig {
+  baseUrl: string
+  apiKey: string
+  organizationId?: string
+  enabled: boolean
+  autoSync: boolean
+  syncInterval: number
+  useMockData: boolean
+  lastSync?: string
+}
+
+interface VCMSyncSettings {
+  includeDeprecated: boolean
+  overwriteLocal: boolean
+  syncOnStartup: boolean
+  notifyOnSync: boolean
+  batchSize: number
+  retryAttempts: number
+}
+
+// シンプルなローカルストレージヘルパー - クライアントサイドでのみ実行
+const LocalStorageHelper = {
+  getItem: (key: string, defaultValue: any = null): any => {
+    if (typeof window === "undefined") return defaultValue
+    try {
+      const item = localStorage.getItem(key)
+      return item ? JSON.parse(item) : defaultValue
+    } catch (e) {
+      console.error(`Error reading ${key} from localStorage:`, e)
+      return defaultValue
+    }
+  },
+
+  setItem: (key: string, value: any): void => {
+    if (typeof window === "undefined") return
+    try {
+      localStorage.setItem(key, JSON.stringify(value))
+    } catch (e) {
+      console.error(`Error writing ${key} to localStorage:`, e)
+    }
+  },
+
+  removeItem: (key: string): void => {
+    if (typeof window === "undefined") return
+    try {
+      localStorage.removeItem(key)
+    } catch (e) {
+      console.error(`Error removing ${key} from localStorage:`, e)
+    }
+  },
+}
+
+// VCM設定マネージャー - クライアントサイドでのみ実行
+const VCMConfigManager = {
+  getConfig: (): VCMConnectionConfig => {
+    return LocalStorageHelper.getItem("vcm_connection_config", {
+      baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
+      apiKey: "sl_b05t7b1r1nb",
+      organizationId: "",
+      enabled: false,
+      autoSync: false,
+      syncInterval: 60,
+      useMockData: false,
+    })
+  },
+
+  saveConfig: (config: VCMConnectionConfig): void => {
+    LocalStorageHelper.setItem("vcm_connection_config", config)
+  },
+
+  getSyncSettings: (): VCMSyncSettings => {
+    return LocalStorageHelper.getItem("vcm_sync_settings", {
+      includeDeprecated: false,
+      overwriteLocal: true,
+      syncOnStartup: false,
+      notifyOnSync: true,
+      batchSize: 10,
+      retryAttempts: 3,
+    })
+  },
+
+  saveSyncSettings: (settings: VCMSyncSettings): void => {
+    LocalStorageHelper.setItem("vcm_sync_settings", settings)
+  },
+
+  updateLastSync: (): void => {
+    const config = VCMConfigManager.getConfig()
+    config.lastSync = new Date().toISOString()
+    VCMConfigManager.saveConfig(config)
+  },
+
+  clearConfig: (): void => {
+    LocalStorageHelper.removeItem("vcm_connection_config")
+    LocalStorageHelper.removeItem("vcm_sync_settings")
+  },
+
+  isConfigured: (): boolean => {
+    const config = VCMConfigManager.getConfig()
+    return config.enabled && (config.useMockData || (!!config.baseUrl && !!config.apiKey))
+  },
+}
 
 interface VCMConnectionSetupProps {
   onConfigChange?: (isConfigured: boolean) => void
 }
 
 export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) {
+  const [isMounted, setIsMounted] = useState(false)
   const [config, setConfig] = useState<VCMConnectionConfig>({
     baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
     apiKey: "sl_b05t7b1r1nb",
@@ -38,7 +140,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     enabled: false,
     autoSync: false,
     syncInterval: 60,
-    useMockData: true,
+    useMockData: false,
   })
 
   const [syncSettings, setSyncSettings] = useState<VCMSyncSettings>({
@@ -59,12 +161,13 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   const [integrationStatus, setIntegrationStatus] = useState<any>(null)
   const [isRegisteringIntegration, setIsRegisteringIntegration] = useState(false)
 
+  // クライアントサイドでのみ実行されるuseEffect
   useEffect(() => {
+    setIsMounted(true)
+
     // Load saved configuration
     const savedConfig = VCMConfigManager.getConfig()
-    if (savedConfig) {
-      setConfig(savedConfig)
-    }
+    setConfig(savedConfig)
 
     const savedSyncSettings = VCMConfigManager.getSyncSettings()
     setSyncSettings(savedSyncSettings)
@@ -100,14 +203,34 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   }
 
   const testConnection = async () => {
+    if (!isMounted) return
+
     setIsTestingConnection(true)
     setConnectionStatus("unknown")
     setConnectionError(null)
     setConnectionDetails(null)
 
     try {
-      const client = new VCMBrowserClient(config, config.useMockData ?? true)
-      const result = await client.testConnection()
+      console.log(`Testing VCM connection to ${config.baseUrl} (Mock: ${config.useMockData})`)
+
+      const response = await fetch("/api/vcm/test-connection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          useMockData: config.useMockData,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+      console.log("Test connection result:", result)
 
       if (result.success) {
         setConnectionStatus("success")
@@ -135,22 +258,48 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   }
 
   const registerIntegration = async () => {
+    if (!isMounted) return
+
     setIsRegisteringIntegration(true)
 
     try {
-      const client = new VCMBrowserClient(config, config.useMockData ?? true)
-      const integration = await client.registerIntegration({
-        name: "Student Login Site",
-        url: window.location.origin,
-        webhookSecret: "whisec_lf1jah5h",
-        autoSync: true,
+      console.log(`Registering integration with ${config.baseUrl} (Mock: ${config.useMockData})`)
+
+      const response = await fetch("/api/vcm/register-integration", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          useMockData: config.useMockData,
+          integration: {
+            name: "Student Login Site",
+            url: window.location.origin,
+            webhookSecret: "whisec_lf1jah5h",
+            autoSync: true,
+          },
+        }),
       })
 
-      setIntegrationStatus({
-        status: integration.status,
-        lastSync: integration.lastSync,
-        webhookUrl: `${window.location.origin}/api/webhooks/vcm`,
-      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
+      const result = await response.json()
+      console.log("Register integration result:", result)
+
+      if (result.success) {
+        setIntegrationStatus({
+          status: result.integration.status,
+          lastSync: result.integration.lastSync,
+          webhookUrl: `${window.location.origin}/api/webhooks/vcm`,
+        })
+      } else {
+        throw new Error(result.message || "統合の登録に失敗しました")
+      }
     } catch (error) {
       console.error("Integration registration failed:", error)
       setConnectionError(error instanceof Error ? error.message : "統合の登録に失敗しました")
@@ -160,6 +309,8 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   }
 
   const syncCredentialTypes = async () => {
+    if (!isMounted) return
+
     if (!config.enabled) {
       setSyncResult({
         success: false,
@@ -174,17 +325,77 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setSyncResult(null)
 
     try {
-      const client = new VCMBrowserClient(config, config.useMockData ?? true)
-      const result = await client.syncCredentialTypes()
-      setSyncResult(result)
+      console.log("Starting credential types sync...")
 
-      if (result.success) {
+      // API経由でクレデンシャルタイプを取得
+      const params = new URLSearchParams({
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        useMockData: config.useMockData.toString(),
+      })
+
+      const response = await fetch(`/api/vcm/credential-types?${params}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
+      const result = await response.json()
+      console.log("Credential types fetch result:", result)
+
+      if (!result.success) {
+        throw new Error(result.message || "クレデンシャルタイプの取得に失敗しました")
+      }
+
+      const credentialTypes = result.credentialTypes || []
+
+      // クライアントサイドでローカルストレージに保存
+      let syncedCount = 0
+      const errors: string[] = []
+
+      for (const vcmType of credentialTypes) {
+        try {
+          // VCMタイプをローカルテンプレート形式に変換
+          const template = convertVCMTypeToLocalTemplate(vcmType)
+
+          // ローカルストレージに保存
+          const existingTemplates = getLocalTemplates()
+          const updatedTemplates = existingTemplates.filter((t) => t.id !== template.id)
+          updatedTemplates.push(template)
+
+          LocalStorageHelper.setItem("vcm_synced_templates", updatedTemplates)
+          syncedCount++
+        } catch (error) {
+          errors.push(`Failed to sync ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`)
+        }
+      }
+
+      const syncResult = {
+        success: errors.length === 0,
+        synced: syncedCount,
+        errors,
+        lastSync: new Date().toISOString(),
+        mode: result.mode,
+        debugInfo: result.debugInfo,
+        errorDetails: result.errorDetails,
+      }
+
+      setSyncResult(syncResult)
+
+      if (syncResult.success) {
         VCMConfigManager.updateLastSync()
         const updatedConfig = { ...config, lastSync: new Date().toISOString() }
         setConfig(updatedConfig)
         VCMConfigManager.saveConfig(updatedConfig)
       }
     } catch (error) {
+      console.error("Sync error:", error)
       setSyncResult({
         success: false,
         synced: 0,
@@ -196,7 +407,74 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     }
   }
 
+  // ヘルパー関数
+  const convertVCMTypeToLocalTemplate = (vcmType: any) => {
+    const properties = vcmType.schema?.properties || {}
+    const required = vcmType.schema?.required || []
+
+    const claims = Object.entries(properties).map(([key, property]: [string, any]) => ({
+      key,
+      name: property.title || key,
+      description: property.description || `${key} field`,
+      type: mapSchemaTypeToClaimType(property.type, property.format),
+      required: required.includes(key),
+      selectiveDisclosure: property.selectiveDisclosure || false,
+      defaultValue: property.default,
+      enum: property.enum,
+      pattern: property.pattern,
+      minLength: property.minLength,
+      maxLength: property.maxLength,
+    }))
+
+    return {
+      id: vcmType.id,
+      name: vcmType.display?.name || vcmType.name,
+      description: vcmType.display?.description || vcmType.description,
+      type: vcmType.issuanceConfig?.type || ["VerifiableCredential"],
+      context: vcmType.issuanceConfig?.context || ["https://www.w3.org/2018/credentials/v1"],
+      claims,
+      display: {
+        name: vcmType.display?.name || vcmType.name,
+        locale: vcmType.display?.locale || "ja-JP",
+        backgroundColor: vcmType.display?.backgroundColor || "#1e40af",
+        textColor: vcmType.display?.textColor || "#ffffff",
+        logo: vcmType.display?.logo,
+      },
+      validityPeriod: vcmType.issuanceConfig?.validityPeriod || 365,
+      issuer: vcmType.issuanceConfig?.issuer || "https://university.example.com",
+      version: vcmType.version || "1.0.0",
+      status: vcmType.status || "active",
+      source: "vcm" as const,
+      vcmId: vcmType.id,
+      lastSynced: new Date().toISOString(),
+      syncStatus: "synced" as const,
+    }
+  }
+
+  const mapSchemaTypeToClaimType = (schemaType: string, format?: string): string => {
+    if (format === "date" || format === "date-time") {
+      return "date"
+    }
+
+    switch (schemaType) {
+      case "integer":
+      case "number":
+        return "number"
+      case "boolean":
+        return "boolean"
+      case "string":
+      default:
+        return "string"
+    }
+  }
+
+  const getLocalTemplates = (): any[] => {
+    return LocalStorageHelper.getItem("vcm_synced_templates", [])
+  }
+
   const clearConfiguration = () => {
+    if (!isMounted) return
+
     VCMConfigManager.clearConfig()
     const defaultConfig = {
       baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
@@ -205,7 +483,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
       enabled: false,
       autoSync: false,
       syncInterval: 60,
-      useMockData: true,
+      useMockData: false,
     }
     setConfig(defaultConfig)
     setConnectionStatus("unknown")
@@ -219,6 +497,27 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   const formatLastSync = (lastSync?: string) => {
     if (!lastSync) return "未同期"
     return new Date(lastSync).toLocaleString("ja-JP")
+  }
+
+  // サーバーサイドレンダリング時は最小限のコンテンツを表示
+  if (!isMounted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Link className="h-5 w-5 mr-2" />
+            Verifiable Credential Manager 連携
+          </CardTitle>
+          <CardDescription>VCMとの連携を設定して、クレデンシャルタイプとスキーマを同期します</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="p-8 text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p>読み込み中...</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -254,7 +553,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   <Label className="text-base">デモモード</Label>
                   <div className="text-sm text-gray-500">実際のVCMの代わりにモックデータを使用</div>
                 </div>
-                <Switch checked={config.useMockData ?? true} onCheckedChange={handleUseMockDataChange} />
+                <Switch checked={config.useMockData ?? false} onCheckedChange={handleUseMockDataChange} />
               </div>
 
               <Separator />
@@ -448,9 +747,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <Label className="text-xs text-gray-500">Student Login Site URL</Label>
-                      <div className="font-mono text-xs">
-                        {typeof window !== "undefined" ? window.location.origin : ""}
-                      </div>
+                      <div className="font-mono text-xs">{window.location.origin}</div>
                     </div>
                     <div>
                       <Label className="text-xs text-gray-500">Webhook Secret</Label>
@@ -570,20 +867,68 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                   {syncResult.success ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
                   <AlertTitle>{syncResult.success ? "同期完了" : "同期エラー"}</AlertTitle>
                   <AlertDescription>
-                    {syncResult.success ? (
-                      `${syncResult.synced}個のクレデンシャルタイプを同期しました。`
-                    ) : (
-                      <div>
-                        <p>同期中にエラーが発生しました：</p>
-                        <ul className="list-disc list-inside mt-1">
-                          {syncResult.errors.map((error: string, index: number) => (
-                            <li key={index} className="text-sm">
-                              {error}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    <div className="space-y-3">
+                      {syncResult.success ? (
+                        <div>
+                          <p>{`${syncResult.synced}個のクレデンシャルタイプを同期しました。`}</p>
+                          {syncResult.mode && <p className="text-sm text-gray-600">モード: {syncResult.mode}</p>}
+                        </div>
+                      ) : (
+                        <div>
+                          <p>同期中にエラーが発生しました：</p>
+                          <ul className="list-disc list-inside mt-1 space-y-1">
+                            {syncResult.errors.map((error: string, index: number) => (
+                              <li key={index} className="text-sm">
+                                {error}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {syncResult.errorDetails && (
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-sm font-medium">詳細なエラー情報</summary>
+                          <div className="mt-2 p-3 bg-gray-50 rounded text-xs">
+                            <div className="space-y-2">
+                              <div>
+                                <strong>エラータイプ:</strong> {syncResult.errorDetails.type}
+                              </div>
+                              {syncResult.errorDetails.httpStatus && (
+                                <div>
+                                  <strong>HTTPステータス:</strong> {syncResult.errorDetails.httpStatus}
+                                </div>
+                              )}
+                              {syncResult.errorDetails.errorMessage && (
+                                <div>
+                                  <strong>エラーメッセージ:</strong> {syncResult.errorDetails.errorMessage}
+                                </div>
+                              )}
+                              {syncResult.errorDetails.connectionDetails && (
+                                <div>
+                                  <strong>接続先:</strong> {syncResult.errorDetails.connectionDetails.endpoint}
+                                </div>
+                              )}
+                              {syncResult.errorDetails.responseTime && (
+                                <div>
+                                  <strong>レスポンス時間:</strong> {syncResult.errorDetails.responseTime}ms
+                                </div>
+                              )}
+                              {syncResult.errorDetails.troubleshooting && (
+                                <div>
+                                  <strong>トラブルシューティング:</strong>
+                                  <ul className="list-disc list-inside ml-4 mt-1">
+                                    {syncResult.errorDetails.troubleshooting.map((item: string, index: number) => (
+                                      <li key={index}>{item}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </details>
+                      )}
+                    </div>
                   </AlertDescription>
                 </Alert>
               )}
@@ -627,8 +972,16 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                     <div className="text-sm text-gray-500">必要な設定項目の入力状況</div>
                   </div>
                 </div>
-                <Badge variant={VCMConfigManager.isConfigured() ? "default" : "destructive"}>
-                  {VCMConfigManager.isConfigured() ? "設定完了" : "設定不完全"}
+                <Badge
+                  variant={
+                    config.enabled && (config.useMockData || (!!config.baseUrl && !!config.apiKey))
+                      ? "default"
+                      : "destructive"
+                  }
+                >
+                  {config.enabled && (config.useMockData || (!!config.baseUrl && !!config.apiKey))
+                    ? "設定完了"
+                    : "設定不完全"}
                 </Badge>
               </div>
 

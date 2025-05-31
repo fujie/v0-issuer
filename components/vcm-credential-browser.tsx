@@ -7,8 +7,20 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Search, RefreshCw, FileText, CheckCircle, AlertCircle, Loader2, Info } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  Search,
+  RefreshCw,
+  FileText,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Info,
+  ChevronDown,
+  ChevronRight,
+  Bug,
+} from "lucide-react"
 import { VCMBrowserClient, type VCMCredentialType } from "@/lib/vcm-client-browser"
 import { VCMConfigManager } from "@/lib/vcm-config"
 
@@ -23,31 +35,66 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
   const [selectedType, setSelectedType] = useState<VCMCredentialType | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorDetails, setErrorDetails] = useState<any>(null)
+  const [connectionMode, setConnectionMode] = useState<string>("unknown")
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "deprecated">("all")
+  const [showErrorDetails, setShowErrorDetails] = useState(false)
 
   const loadCredentialTypes = async () => {
     const config = VCMConfigManager.getConfig()
     if (!config) {
       setError("VCM連携が設定されていません")
+      setErrorDetails(null)
       return
     }
 
     if (!config.enabled) {
       setError("VCM連携が有効になっていません。管理画面で連携を有効にしてください。")
+      setErrorDetails(null)
       return
     }
 
     setIsLoading(true)
     setError(null)
+    setErrorDetails(null)
+    setConnectionMode("unknown")
 
     try {
       // Use browser client that calls API routes
-      const client = new VCMBrowserClient(config, config.useMockData ?? true)
+      const client = new VCMBrowserClient(config, config.useMockData ?? false)
       const types = await client.getCredentialTypes()
       setCredentialTypes(types)
       setFilteredTypes(types)
+      setConnectionMode("success")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "クレデンシャルタイプの取得に失敗しました")
+      console.error("Failed to load credential types:", err)
+
+      // エラーの詳細情報を取得
+      if (err instanceof Error && err.message.includes("フォールバック")) {
+        setConnectionMode("fallback")
+        setError("VCM接続に失敗しました。フォールバックデータを使用しています。")
+
+        // APIから詳細なエラー情報を取得
+        try {
+          const params = new URLSearchParams({
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            useMockData: (config.useMockData ?? false).toString(),
+          })
+
+          const response = await fetch(`/api/vcm/credential-types?${params}`)
+          const result = await response.json()
+
+          if (result.errorDetails) {
+            setErrorDetails(result.errorDetails)
+          }
+        } catch (detailError) {
+          console.error("Failed to get error details:", detailError)
+        }
+      } else {
+        setConnectionMode("error")
+        setError(err instanceof Error ? err.message : "クレデンシャルタイプの取得に失敗しました")
+      }
     } finally {
       setIsLoading(false)
     }
@@ -165,6 +212,117 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
     return type.schema?.required || []
   }
 
+  const renderErrorDetails = () => {
+    if (!errorDetails) return null
+
+    return (
+      <Collapsible open={showErrorDetails} onOpenChange={setShowErrorDetails}>
+        <CollapsibleTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full mt-2">
+            {showErrorDetails ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronRight className="h-4 w-4 mr-2" />}
+            <Bug className="h-4 w-4 mr-2" />
+            エラーの詳細を表示
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-3">
+          <div className="bg-gray-50 p-4 rounded-md text-sm space-y-3">
+            <div>
+              <Label className="text-xs font-semibold text-gray-700">エラータイプ</Label>
+              <div className="font-mono text-red-600">{errorDetails.type}</div>
+            </div>
+
+            {errorDetails.errorMessage && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">エラーメッセージ</Label>
+                <div className="text-red-600">{errorDetails.errorMessage}</div>
+              </div>
+            )}
+
+            {errorDetails.httpStatus && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">HTTPステータス</Label>
+                <div className="font-mono">
+                  {errorDetails.httpStatus} {errorDetails.httpStatusText}
+                </div>
+              </div>
+            )}
+
+            {errorDetails.connectionDetails && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">接続詳細</Label>
+                <div className="bg-white p-2 rounded border font-mono text-xs">
+                  <div>
+                    <strong>エンドポイント:</strong> {errorDetails.connectionDetails.endpoint}
+                  </div>
+                  <div>
+                    <strong>メソッド:</strong> {errorDetails.connectionDetails.method}
+                  </div>
+                  <div>
+                    <strong>タイムアウト:</strong> {errorDetails.connectionDetails.timeout}ms
+                  </div>
+                  <div>
+                    <strong>タイムスタンプ:</strong> {errorDetails.connectionDetails.timestamp}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {errorDetails.responseTime && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">レスポンス時間</Label>
+                <div className="font-mono">{errorDetails.responseTime}ms</div>
+              </div>
+            )}
+
+            {errorDetails.troubleshooting && errorDetails.troubleshooting.length > 0 && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">トラブルシューティング</Label>
+                <ul className="list-disc list-inside space-y-1 text-gray-600">
+                  {errorDetails.troubleshooting.map((item: string, index: number) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {errorDetails.suggestedActions && errorDetails.suggestedActions.length > 0 && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">推奨アクション</Label>
+                <ul className="list-disc list-inside space-y-1 text-blue-600">
+                  {errorDetails.suggestedActions.map((action: string, index: number) => (
+                    <li key={index}>{action}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {errorDetails.errorText && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">レスポンス内容</Label>
+                <div className="bg-white p-2 rounded border font-mono text-xs max-h-32 overflow-y-auto">
+                  {errorDetails.errorText}
+                </div>
+              </div>
+            )}
+
+            {errorDetails.responseHeaders && (
+              <div>
+                <Label className="text-xs font-semibold text-gray-700">レスポンスヘッダー</Label>
+                <div className="bg-white p-2 rounded border font-mono text-xs max-h-32 overflow-y-auto">
+                  {Object.entries(errorDetails.responseHeaders).map(([key, value]) => (
+                    <div key={key}>
+                      <strong>{key}:</strong> {value as string}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -196,12 +354,32 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
               </Alert>
             )}
 
-            {config?.useMockData && isConfigured && (
+            {connectionMode === "demo" && isConfigured && (
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
                   デモモードが有効です。モックデータを使用してクレデンシャルタイプを表示しています。
                 </AlertDescription>
+              </Alert>
+            )}
+
+            {connectionMode === "fallback" && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>VCM接続エラー</AlertTitle>
+                <AlertDescription>
+                  <div className="space-y-2">
+                    <p>{error}</p>
+                    {errorDetails && renderErrorDetails()}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {connectionMode === "success" && !config?.useMockData && (
+              <Alert>
+                <CheckCircle className="h-4 w-4" />
+                <AlertDescription>VCMサーバーに正常に接続し、クレデンシャルタイプを取得しました。</AlertDescription>
               </Alert>
             )}
 
@@ -238,7 +416,7 @@ export function VCMCredentialBrowser({ onCredentialTypeSelect }: VCMCredentialBr
                   </div>
                 </div>
 
-                {error && (
+                {error && connectionMode !== "fallback" && (
                   <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
                     <AlertDescription>{error}</AlertDescription>

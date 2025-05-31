@@ -2,282 +2,218 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    const { baseUrl, apiKey, useMockData } = await request.json()
+    const body = await request.json()
+    const { baseUrl, apiKey, useMockData } = body
 
+    console.log("VCM connection test:", { baseUrl, apiKey: apiKey ? "***" : null, useMockData })
+
+    if (!baseUrl || !apiKey) {
+      return NextResponse.json({
+        success: false,
+        message: "Base URLとAPI Keyが必要です",
+        statusCode: 400,
+      })
+    }
+
+    // デモモードが明示的に指定されている場合
     if (useMockData) {
-      // Return mock success for demo mode
-      await new Promise((resolve) => setTimeout(resolve, 1000)) // Simulate delay
+      console.log("Demo mode explicitly enabled")
+      await new Promise((resolve) => setTimeout(resolve, 500)) // デモ用の遅延
+
       return NextResponse.json({
         success: true,
-        message: "デモモード: VCMとの接続が正常に確立されました",
-        version: "demo-1.0.0",
+        message: "デモモード: 接続テストをシミュレートしました",
         mode: "demo",
         healthData: {
+          service: "VCM Demo Service",
+          version: "1.0.0-demo",
           status: "healthy",
-          service: "Verifiable Credential Manager (Demo)",
-          version: "demo-1.0.0",
           authentication: {
-            required: false,
-            status: "not_required",
+            required: true,
+            status: "valid",
           },
           features: {
             credentialTypes: true,
-            credentialIssuance: true,
-            credentialRevocation: true,
+            issuance: true,
+            verification: true,
             webhooks: true,
-            sync: true,
           },
         },
       })
     }
 
-    if (!baseUrl || !apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Base URLとAPI Keyが必要です",
-          troubleshooting: [
-            "VCM Base URLを入力してください",
-            "API Keyを入力してください",
-            "または、デモモードを有効にしてください",
-          ],
-        },
-        { status: 400 },
-      )
-    }
+    // 実際のVCMとの接続テスト
+    console.log(`Testing connection to VCM at ${baseUrl}`)
 
-    console.log(`Testing VCM connection to: ${baseUrl}`)
-    console.log(`API Key provided: ${apiKey ? "Yes" : "No"}`)
-
-    // Validate URL format
     try {
-      new URL(baseUrl)
-    } catch (urlError) {
-      return NextResponse.json({
-        success: false,
-        message: "無効なURL形式です",
-        troubleshooting: [
-          "URLが正しい形式か確認してください (例: https://example.com)",
-          "プロトコル (http:// または https://) が含まれているか確認してください",
-        ],
-      })
-    }
+      // まず基本的なヘルスチェックを試行
+      const healthEndpoints = ["/api/health", "/health", "/api/status"]
+      let healthResult = null
+      let healthEndpoint = null
 
-    // Test VCM's health endpoint
-    try {
-      const healthEndpoint = `${baseUrl}/api/health`
-      console.log(`Testing VCM health endpoint: ${healthEndpoint}`)
+      for (const endpoint of healthEndpoints) {
+        try {
+          const healthUrl = `${baseUrl}${endpoint}`
+          console.log(`Trying health check at: ${healthUrl}`)
 
-      // First try GET request
-      const getResponse = await fetch(healthEndpoint, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "Student-Login-Site/1.0",
-          "X-API-Key": apiKey,
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: AbortSignal.timeout(10000), // 10 seconds
-      })
+          const healthResponse = await fetch(healthUrl, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "X-API-Key": apiKey,
+              Authorization: `Bearer ${apiKey}`,
+              "User-Agent": "Student-Login-Site/1.0",
+            },
+            signal: AbortSignal.timeout(10000), // 10秒
+          })
 
-      console.log(`VCM health GET response status: ${getResponse.status}`)
+          console.log(`Health check response: ${healthResponse.status}`)
 
-      if (getResponse.ok) {
-        const healthData = await getResponse.json()
-        console.log("VCM health data:", healthData)
+          if (healthResponse.ok) {
+            healthResult = await healthResponse.json()
+            healthEndpoint = endpoint
+            break
+          } else if (healthResponse.status === 401) {
+            // 認証エラーの場合、POSTで認証情報を送信
+            console.log("Authentication required, trying POST with credentials")
+
+            const authResponse = await fetch(healthUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-API-Key": apiKey,
+                Authorization: `Bearer ${apiKey}`,
+                "User-Agent": "Student-Login-Site/1.0",
+              },
+              body: JSON.stringify({
+                apiKey: apiKey,
+                source: "student-login-site",
+              }),
+              signal: AbortSignal.timeout(10000),
+            })
+
+            if (authResponse.ok) {
+              healthResult = await authResponse.json()
+              healthEndpoint = endpoint
+              break
+            }
+          }
+        } catch (endpointError) {
+          console.log(`Health check failed for ${endpoint}:`, endpointError)
+          continue
+        }
+      }
+
+      if (healthResult) {
+        console.log("VCM health check successful:", healthResult)
 
         return NextResponse.json({
           success: true,
           message: "VCMとの接続が正常に確立されました",
-          version: healthData.version || "unknown",
           mode: "production",
-          endpoint: healthEndpoint,
           method: "GET",
-          healthData: healthData,
-          authentication: healthData.authentication || { required: false, status: "unknown" },
+          endpoint: healthEndpoint,
+          healthData: {
+            service: healthResult.service || "VCM Service",
+            version: healthResult.version || "unknown",
+            status: healthResult.status || "healthy",
+            authentication: {
+              required: true,
+              status: "valid",
+            },
+            features: healthResult.features || {
+              credentialTypes: true,
+              issuance: true,
+              verification: true,
+              webhooks: true,
+            },
+          },
         })
-      } else if (getResponse.status === 401) {
-        // Try POST request with authentication in body
-        console.log("GET request returned 401, trying POST with body authentication")
+      } else {
+        // ヘルスチェックが失敗した場合、クレデンシャルタイプエンドポイントを直接試行
+        console.log("Health check failed, trying credential types endpoint directly")
 
-        const postResponse = await fetch(healthEndpoint, {
-          method: "POST",
+        const credentialTypesUrl = `${baseUrl}/api/credential-types`
+        const credentialTypesResponse = await fetch(credentialTypesUrl, {
+          method: "GET",
           headers: {
             "Content-Type": "application/json",
-            "User-Agent": "Student-Login-Site/1.0",
             "X-API-Key": apiKey,
             Authorization: `Bearer ${apiKey}`,
+            "User-Agent": "Student-Login-Site/1.0",
           },
-          body: JSON.stringify({
-            source: "student-login-site",
-            timestamp: new Date().toISOString(),
-            apiKey: apiKey,
-          }),
           signal: AbortSignal.timeout(10000),
         })
 
-        console.log(`VCM health POST response status: ${postResponse.status}`)
-
-        if (postResponse.ok) {
-          const healthData = await postResponse.json()
-          console.log("VCM health data (POST):", healthData)
+        if (credentialTypesResponse.ok) {
+          console.log("Credential types endpoint accessible")
 
           return NextResponse.json({
             success: true,
-            message: "VCMとの接続が正常に確立されました（認証済み）",
-            version: healthData.version || "unknown",
+            message: "VCMのクレデンシャルタイプエンドポイントにアクセスできました",
             mode: "production",
-            endpoint: healthEndpoint,
-            method: "POST",
-            healthData: healthData,
-            authentication: healthData.authentication || { required: true, status: "authenticated" },
-          })
-        } else if (postResponse.status === 401) {
-          let errorMessage = "認証エラー: 無効なAPI Key"
-          try {
-            const errorData = await postResponse.json()
-            errorMessage = `認証エラー: ${errorData.message || "無効なAPI Key"}`
-          } catch (e) {
-            // If we can't parse JSON, use default message
-          }
-
-          return NextResponse.json({
-            success: false,
-            message: errorMessage,
-            statusCode: 401,
-            endpoint: healthEndpoint,
-            troubleshooting: [
-              "API Keyが正しいか確認してください",
-              "VCMサーバーでAPI Keyが有効になっているか確認してください",
-              "API Keyの権限が適切に設定されているか確認してください",
-              "VCMサーバーの認証設定を確認してください",
-            ],
+            method: "GET",
+            endpoint: "/api/credential-types",
+            statusCode: credentialTypesResponse.status,
+            healthData: {
+              service: "VCM Service",
+              version: "unknown",
+              status: "accessible",
+              authentication: {
+                required: true,
+                status: "valid",
+              },
+              features: {
+                credentialTypes: true,
+                issuance: false,
+                verification: false,
+                webhooks: false,
+              },
+            },
           })
         } else {
-          // Handle other POST errors
-          let errorMessage = `VCMサーバーエラー (${postResponse.status}): ${postResponse.statusText}`
-          try {
-            const errorData = await postResponse.json()
-            errorMessage = `VCMサーバーエラー (${postResponse.status}): ${errorData.error || postResponse.statusText}`
-          } catch (e) {
-            // If we can't parse JSON, use status text
-          }
+          console.error(`Credential types endpoint failed: ${credentialTypesResponse.status}`)
 
           return NextResponse.json({
             success: false,
-            message: errorMessage,
-            statusCode: postResponse.status,
+            message: `VCMへの接続に失敗しました (${credentialTypesResponse.status})`,
+            statusCode: credentialTypesResponse.status,
+            endpoint: "/api/credential-types",
+            error: "ConnectionFailed",
             troubleshooting: [
-              "VCMサーバーが正常に動作しているか確認してください",
-              "サーバーのログを確認してください",
-              "一時的な問題の可能性があります。しばらく待ってから再試行してください",
+              "VCMサーバーが起動していることを確認してください",
+              "API Keyが正しいことを確認してください",
+              "ネットワーク接続を確認してください",
+              "VCMのログを確認してください",
             ],
+            suggestedActions: ["VCMサーバーの状態を確認する", "API Keyを再確認する", "デモモードを試す"],
           })
         }
-      } else if (getResponse.status === 404) {
-        return NextResponse.json({
-          success: false,
-          message: "VCMのヘルスエンドポイントが見つかりません",
-          statusCode: 404,
-          endpoint: healthEndpoint,
-          troubleshooting: [
-            "VCMサーバーが正しく起動しているか確認してください",
-            "VCMのバージョンが最新か確認してください",
-            "エンドポイントパス /api/health が実装されているか確認してください",
-            "デモモードを使用することをお勧めします",
-          ],
-        })
-      } else if (getResponse.status === 503) {
-        let errorMessage = "VCMサーバーが利用できません"
-        try {
-          const errorData = await getResponse.json()
-          errorMessage = `VCMサーバーが利用できません: ${errorData.error || "サービス停止中"}`
-        } catch (e) {
-          // If we can't parse JSON, use default message
-        }
-
-        return NextResponse.json({
-          success: false,
-          message: errorMessage,
-          statusCode: 503,
-          troubleshooting: [
-            "VCMサーバーが一時的に利用できない状態です",
-            "サーバーのログを確認してください",
-            "データベース接続を確認してください",
-            "しばらく待ってから再試行してください",
-          ],
-        })
-      } else {
-        // Handle other GET errors
-        let errorMessage = `VCMサーバーエラー (${getResponse.status}): ${getResponse.statusText}`
-        try {
-          const errorData = await getResponse.json()
-          errorMessage = `VCMサーバーエラー (${getResponse.status}): ${errorData.error || getResponse.statusText}`
-        } catch (e) {
-          // If we can't parse JSON, use status text
-        }
-
-        return NextResponse.json({
-          success: false,
-          message: errorMessage,
-          statusCode: getResponse.status,
-          troubleshooting: [
-            "VCMサーバーが正常に動作しているか確認してください",
-            "サーバーのログを確認してください",
-            "一時的な問題の可能性があります。しばらく待ってから再試行してください",
-          ],
-        })
       }
     } catch (connectionError) {
-      console.error("VCM connection test error:", connectionError)
+      console.error("VCM connection error:", connectionError)
 
-      let errorMessage = "VCMサーバーへの接続でエラーが発生しました"
-      let troubleshooting = [
-        "VCMサーバーが起動しているか確認してください",
-        "ネットワーク接続を確認してください",
-        "URLが正しいか確認してください",
-        "デモモードを使用することをお勧めします",
-      ]
-
-      if (connectionError instanceof Error) {
-        if (connectionError.name === "TimeoutError") {
-          errorMessage = "VCMサーバーへの接続がタイムアウトしました"
-          troubleshooting = [
-            "VCMサーバーの応答が遅い可能性があります",
-            "ネットワーク接続を確認してください",
-            "VCMサーバーが過負荷状態でないか確認してください",
-            "しばらく待ってから再試行してください",
-          ]
-        } else if (connectionError.message.includes("fetch")) {
-          errorMessage = "VCMサーバーに到達できません"
-          troubleshooting = [
-            "URLが正しいか確認してください",
-            "VCMサーバーが起動しているか確認してください",
-            "ファイアウォールの設定を確認してください",
-            "インターネット接続を確認してください",
-          ]
-        }
-      }
+      const errorMessage = connectionError instanceof Error ? connectionError.message : "Unknown error"
 
       return NextResponse.json({
         success: false,
-        message: `${errorMessage}: ${connectionError instanceof Error ? connectionError.message : "不明なエラー"}`,
+        message: `VCMへの接続でエラーが発生しました: ${errorMessage}`,
         error: connectionError instanceof Error ? connectionError.name : "UnknownError",
-        troubleshooting,
+        troubleshooting: [
+          "VCMサーバーのURLが正しいことを確認してください",
+          "VCMサーバーが起動していることを確認してください",
+          "ファイアウォールやプロキシの設定を確認してください",
+          "ネットワーク接続を確認してください",
+        ],
+        suggestedActions: ["VCMサーバーの状態を確認する", "ネットワーク設定を確認する", "デモモードを試す"],
       })
     }
   } catch (error) {
-    console.error("VCM connection test error:", error)
+    console.error("Connection test API error:", error)
     return NextResponse.json(
       {
         success: false,
         message: `接続テストでエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
-        error: error instanceof Error ? error.name : "UnknownError",
-        troubleshooting: [
-          "リクエストの形式を確認してください",
-          "サーバーのログを確認してください",
-          "デモモードを使用することをお勧めします",
-        ],
       },
       { status: 500 },
     )
