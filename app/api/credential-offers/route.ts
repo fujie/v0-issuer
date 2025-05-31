@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const url = new URL(request.url)
     const baseUrl = `${url.protocol}//${url.host}`
 
-    // Credential Offerを作成
+    // Credential Offerを作成（credential_issuerを正しく設定）
     const offer = {
       credential_issuer: baseUrl,
       credential_configuration_ids: [credentialConfigurationId],
