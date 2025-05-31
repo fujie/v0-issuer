@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getToken } from "@/lib/storage"
 import { getCredentialTemplate } from "@/lib/credential-templates"
 import { CredentialTemplateManager } from "@/lib/credential-templates-enhanced"
 
@@ -67,19 +68,39 @@ export async function POST(request: Request) {
       return setCorsHeaders(response)
     }
 
-    // ===== TEST MODE: Skip access token validation =====
-    console.log("🧪 TEST MODE: Skipping access token validation")
-
-    // Get authorization header for logging purposes only
+    // Get authorization header
     const authHeader = request.headers.get("authorization") || ""
     const accessToken = authHeader.replace("Bearer ", "")
 
     console.log("Authorization header present:", !!authHeader)
     console.log("Access token (first 10 chars):", accessToken.substring(0, 10) + "...")
 
-    // Use fixed test user ID instead of token validation
-    const testUserId = "test-user-123"
-    console.log("Using test user ID:", testUserId)
+    // Get student info from access token (TEST MODE: use any token)
+    let studentInfo: any = null
+    let userId = "test-user-123" // fallback
+
+    if (accessToken) {
+      try {
+        const tokenData = getToken(accessToken)
+        if (tokenData && tokenData.studentInfo) {
+          studentInfo = tokenData.studentInfo
+          userId = tokenData.userId
+          console.log("Found student info from token:", studentInfo)
+        } else {
+          console.log("No student info found in token, using default")
+        }
+      } catch (error) {
+        console.log("Error getting token data:", error)
+      }
+    }
+
+    // Fallback to default student info if not found
+    if (!studentInfo) {
+      studentInfo = getDefaultStudentInfo()
+      console.log("Using default student info")
+    }
+
+    console.log("Student info to use:", studentInfo)
 
     // Validate proof if provided (optional for testing)
     if (proof) {
@@ -106,9 +127,14 @@ export async function POST(request: Request) {
 
     console.log("Found credential template:", credentialTemplate.name)
 
-    // Generate credential based on template
+    // Generate credential based on template and student info
     console.log("Generating credential with format:", format || "vc+sd-jwt")
-    const credential = await generateCredentialFromTemplate(testUserId, credentialTemplate, format || "vc+sd-jwt")
+    const credential = await generateCredentialFromTemplate(
+      userId,
+      studentInfo,
+      credentialTemplate,
+      format || "vc+sd-jwt",
+    )
 
     // Generate new c_nonce for next request
     const newCNonce = generateNonce()
@@ -150,7 +176,7 @@ async function getCredentialTemplateById(configId: string) {
 
   // Then, try to get from VCM templates
   try {
-    const vcmTemplates = await CredentialTemplateManager.getTemplates()
+    const vcmTemplates = await CredentialTemplateManager.getAllTemplates()
     const vcmTemplate = vcmTemplates.find((t) => t.id === configId)
     if (vcmTemplate) {
       console.log("Found VCM template:", vcmTemplate.name)
@@ -163,7 +189,7 @@ async function getCredentialTemplateById(configId: string) {
   // Check for VCM template with -vcm suffix
   const vcmConfigId = configId.endsWith("-vcm") ? configId : `${configId}-vcm`
   try {
-    const vcmTemplates = await CredentialTemplateManager.getTemplates()
+    const vcmTemplates = await CredentialTemplateManager.getAllTemplates()
     const vcmTemplate = vcmTemplates.find((t) => t.id === vcmConfigId)
     if (vcmTemplate) {
       console.log("Found VCM template with suffix:", vcmTemplate.name)
@@ -177,20 +203,17 @@ async function getCredentialTemplateById(configId: string) {
   return null
 }
 
-async function generateCredentialFromTemplate(userId: string, template: any, format: string): Promise<string> {
+async function generateCredentialFromTemplate(
+  userId: string,
+  studentInfo: any,
+  template: any,
+  format: string,
+): Promise<string> {
   console.log("=== Generating Credential from Template ===")
   console.log("User ID:", userId)
+  console.log("Student Info:", studentInfo)
   console.log("Template:", template.name)
   console.log("Format:", format)
-
-  // Get user data
-  const userInfo = getUserInfo(userId)
-  if (!userInfo) {
-    console.error("User not found:", userId)
-    throw new Error("User not found")
-  }
-
-  console.log("User info:", userInfo)
 
   // Base64url encoding function
   function base64url(data: string) {
@@ -214,7 +237,7 @@ async function generateCredentialFromTemplate(userId: string, template: any, for
     kid: "university-issuer-key-2023",
   }
 
-  // Prepare claims based on template
+  // Prepare claims based on template and student info
   const claimsData: Record<string, any> = {}
   const disclosures: string[] = []
   const disclosureDigests: string[] = []
@@ -224,9 +247,9 @@ async function generateCredentialFromTemplate(userId: string, template: any, for
     template.claims.forEach((claim: any) => {
       let value: any
 
-      // Map claim key to user info
-      if (userInfo[claim.key] !== undefined) {
-        value = userInfo[claim.key]
+      // Map claim key to student info
+      if (studentInfo[claim.key] !== undefined) {
+        value = studentInfo[claim.key]
       } else if (claim.defaultValue !== undefined) {
         value = claim.defaultValue
       } else {
@@ -234,26 +257,51 @@ async function generateCredentialFromTemplate(userId: string, template: any, for
         switch (claim.key) {
           case "fullName":
           case "name":
-            value = userInfo.name
+            value = studentInfo.name || studentInfo.fullName
             break
           case "studentNumber":
           case "studentId":
-            value = userInfo.studentId
+            value = studentInfo.studentId || studentInfo.studentNumber
             break
           case "faculty":
           case "department":
-            value = userInfo.department
+            value = studentInfo.department || studentInfo.faculty
             break
           case "status":
           case "studentStatus":
-            value = "enrolled"
+            value = studentInfo.status || studentInfo.studentStatus || "enrolled"
             break
           case "enrollmentYear":
-            value = 2021
+            value = studentInfo.enrollmentYear
+            break
+          case "gpa":
+            value = studentInfo.gpa
+            break
+          case "totalCredits":
+            value = studentInfo.totalCredits
+            break
+          case "academicYear":
+          case "currentYear":
+            value = studentInfo.academicYear || studentInfo.currentYear
+            break
+          case "major":
+            value = studentInfo.major
+            break
+          case "degree":
+            value = studentInfo.degree
+            break
+          case "graduationDate":
+            value = studentInfo.graduationDate
+            break
+          case "email":
+            value = studentInfo.email
+            break
+          case "enrollmentStatus":
+            value = studentInfo.enrollmentStatus
             break
           default:
             if (claim.required) {
-              console.warn(`Required claim '${claim.key}' not found in user data`)
+              console.warn(`Required claim '${claim.key}' not found in student data`)
             }
             return
         }
@@ -267,27 +315,32 @@ async function generateCredentialFromTemplate(userId: string, template: any, for
           const disclosure = base64url(JSON.stringify(disclosureArray))
           disclosures.push(disclosure)
           disclosureDigests.push(disclosure)
+          console.log(`Added selective disclosure claim: ${claim.key} = ${value}`)
         } else {
           // Add directly to credential subject for non-selective disclosure claims
           claimsData[claim.key] = value
+          console.log(`Added direct claim: ${claim.key} = ${value}`)
         }
       }
     })
   } else {
     // Fallback for templates without claims structure
     const defaultClaims = {
-      name: userInfo.name,
-      studentId: userInfo.studentId,
-      department: userInfo.department,
-      status: "enrolled",
+      name: studentInfo.name || studentInfo.fullName,
+      studentId: studentInfo.studentId || studentInfo.studentNumber,
+      department: studentInfo.department || studentInfo.faculty,
+      status: studentInfo.status || studentInfo.studentStatus || "enrolled",
     }
 
     Object.entries(defaultClaims).forEach(([key, value]) => {
-      const salt = generateSalt()
-      const disclosureArray = [salt, key, value]
-      const disclosure = base64url(JSON.stringify(disclosureArray))
-      disclosures.push(disclosure)
-      disclosureDigests.push(disclosure)
+      if (value !== undefined) {
+        const salt = generateSalt()
+        const disclosureArray = [salt, key, value]
+        const disclosure = base64url(JSON.stringify(disclosureArray))
+        disclosures.push(disclosure)
+        disclosureDigests.push(disclosure)
+        console.log(`Added fallback selective disclosure claim: ${key} = ${value}`)
+      }
     })
   }
 
@@ -334,52 +387,27 @@ async function generateCredentialFromTemplate(userId: string, template: any, for
   return sdJwt
 }
 
-function getUserInfo(userId: string) {
-  // Demo user data - expanded for testing
-  const users: Record<string, any> = {
-    "test-user-123": {
-      name: "山田 太郎",
-      fullName: "山田 太郎",
-      studentId: "S12345678",
-      studentNumber: "S12345678",
-      department: "工学部 情報工学科",
-      faculty: "工学部",
-      email: "yamada@example.university.edu",
-      status: "enrolled",
-      studentStatus: "enrolled",
-      enrollmentYear: 2021,
-      gpa: 3.75,
-      totalCredits: 98,
-      academicYear: "4年生",
-      major: "情報工学",
-      degree: "学士（工学）",
-      graduationDate: "2025-03-25",
-      currentYear: "4年生",
-      enrollmentStatus: "正規生",
-    },
-    "student-123": {
-      name: "田中 花子",
-      fullName: "田中 花子",
-      studentId: "S87654321",
-      studentNumber: "S87654321",
-      department: "理学部 数学科",
-      faculty: "理学部",
-      email: "tanaka@example.university.edu",
-      status: "enrolled",
-      studentStatus: "enrolled",
-      enrollmentYear: 2020,
-      gpa: 3.85,
-      totalCredits: 120,
-      academicYear: "4年生",
-      major: "数学",
-      degree: "学士（理学）",
-      graduationDate: "2024-03-25",
-      currentYear: "4年生",
-      enrollmentStatus: "正規生",
-    },
+function getDefaultStudentInfo() {
+  return {
+    name: "山田 太郎",
+    fullName: "山田 太郎",
+    studentId: "S12345678",
+    studentNumber: "S12345678",
+    department: "工学部 情報工学科",
+    faculty: "工学部",
+    email: "yamada@example.university.edu",
+    status: "enrolled",
+    studentStatus: "enrolled",
+    enrollmentYear: 2021,
+    gpa: 3.75,
+    totalCredits: 98,
+    academicYear: "4年生",
+    major: "情報工学",
+    degree: "学士（工学）",
+    graduationDate: "2025-03-25",
+    currentYear: "4年生",
+    enrollmentStatus: "正規生",
   }
-
-  return users[userId] || users["test-user-123"] // Default to test user
 }
 
 function generateNonce(): string {

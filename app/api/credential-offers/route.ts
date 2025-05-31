@@ -7,13 +7,15 @@ const preAuthCodes: Record<string, any> = {}
 export async function POST(request: Request) {
   try {
     const data = await request.json()
-    const { templateId, claims } = data
+    const { templateId, claims, studentInfo } = data
 
     if (!templateId) {
       return NextResponse.json({ error: "invalid_request", error_description: "Missing template ID" }, { status: 400 })
     }
 
     console.log("Creating credential offer for template:", templateId)
+    console.log("Student info:", studentInfo)
+    console.log("Claims:", claims)
 
     // テンプレートIDからcredential_configuration_idを決定
     let credentialConfigurationId: string
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
     const url = new URL(request.url)
     const baseUrl = `${url.protocol}//${url.host}`
 
-    // Credential Offerを作成（credential_issuerを正しく設定）
+    // Credential Offerを作成
     const offer = {
       credential_issuer: baseUrl,
       credential_configuration_ids: [credentialConfigurationId],
@@ -53,20 +55,25 @@ export async function POST(request: Request) {
       },
     }
 
-    // Offerを保存
+    // Offerを保存（学生情報とテンプレート情報を含める）
     credentialOffers[offerId] = offer
     preAuthCodes[preAuthCode] = {
       templateId,
-      claims,
+      credentialConfigurationId,
+      claims: claims || {},
+      studentInfo: studentInfo || getDefaultStudentInfo(),
       expiresAt: Date.now() + 600000, // 10分
+      createdAt: Date.now(),
     }
 
     console.log("Credential offer created:", offerId)
+    console.log("Pre-auth code data:", preAuthCodes[preAuthCode])
 
     return NextResponse.json({
       success: true,
       offerId,
       offer,
+      preAuthCode, // デバッグ用に返却
       offerUri: `openid-credential-offer://?credential_offer_uri=${encodeURIComponent(
         `${baseUrl}/api/credential-offers/${offerId}`,
       )}`,
@@ -77,6 +84,29 @@ export async function POST(request: Request) {
       { error: "server_error", error_description: "An error occurred processing the request" },
       { status: 500 },
     )
+  }
+}
+
+function getDefaultStudentInfo() {
+  return {
+    name: "山田 太郎",
+    fullName: "山田 太郎",
+    studentId: "S12345678",
+    studentNumber: "S12345678",
+    department: "工学部 情報工学科",
+    faculty: "工学部",
+    email: "yamada@example.university.edu",
+    status: "enrolled",
+    studentStatus: "enrolled",
+    enrollmentYear: 2021,
+    gpa: 3.75,
+    totalCredits: 98,
+    academicYear: "4年生",
+    major: "情報工学",
+    degree: "学士（工学）",
+    graduationDate: "2025-03-25",
+    currentYear: "4年生",
+    enrollmentStatus: "正規生",
   }
 }
 
