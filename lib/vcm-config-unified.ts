@@ -176,22 +176,6 @@ export class VCMConfigManager {
     }
   }
 
-  static getSyncedTemplates(): any[] {
-    if (!this.isClient()) {
-      return []
-    }
-
-    try {
-      const stored = localStorage.getItem("vcm_synced_templates")
-      const templates = stored ? JSON.parse(stored) : []
-      console.log("VCMConfigManager.getSyncedTemplates: Loaded", templates.length, "templates")
-      return templates
-    } catch (error) {
-      console.error("VCMConfigManager.getSyncedTemplates: Error reading templates:", error)
-      return []
-    }
-  }
-
   // デバッグ用メソッド
   static debugInfo(): any {
     const config = this.getConfig()
@@ -209,6 +193,3 @@ export class VCMConfigManager {
     }
   }
 }
-
-// 後方互換性のための型エイリアス
-export type VCMConfig = VCMConnectionConfig

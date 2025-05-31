@@ -24,108 +24,8 @@ import {
   Settings,
 } from "lucide-react"
 
-// 型定義
-interface VCMConnectionConfig {
-  baseUrl: string
-  apiKey: string
-  organizationId?: string
-  enabled: boolean
-  autoSync: boolean
-  syncInterval: number
-  useMockData: boolean
-  lastSync?: string
-}
-
-interface VCMSyncSettings {
-  includeDeprecated: boolean
-  overwriteLocal: boolean
-  syncOnStartup: boolean
-  notifyOnSync: boolean
-  batchSize: number
-  retryAttempts: number
-}
-
-// シンプルなローカルストレージヘルパー - クライアントサイドでのみ実行
-const LocalStorageHelper = {
-  getItem: (key: string, defaultValue: any = null): any => {
-    if (typeof window === "undefined") return defaultValue
-    try {
-      const item = localStorage.getItem(key)
-      return item ? JSON.parse(item) : defaultValue
-    } catch (e) {
-      console.error(`Error reading ${key} from localStorage:`, e)
-      return defaultValue
-    }
-  },
-
-  setItem: (key: string, value: any): void => {
-    if (typeof window === "undefined") return
-    try {
-      localStorage.setItem(key, JSON.stringify(value))
-    } catch (e) {
-      console.error(`Error writing ${key} to localStorage:`, e)
-    }
-  },
-
-  removeItem: (key: string): void => {
-    if (typeof window === "undefined") return
-    try {
-      localStorage.removeItem(key)
-    } catch (e) {
-      console.error(`Error removing ${key} from localStorage:`, e)
-    }
-  },
-}
-
-// VCM設定マネージャー - クライアントサイドでのみ実行
-const VCMConfigManager = {
-  getConfig: (): VCMConnectionConfig => {
-    return LocalStorageHelper.getItem("vcm_connection_config", {
-      baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
-      apiKey: "sl_b05t7b1r1nb",
-      organizationId: "",
-      enabled: false,
-      autoSync: false,
-      syncInterval: 60,
-      useMockData: false,
-    })
-  },
-
-  saveConfig: (config: VCMConnectionConfig): void => {
-    LocalStorageHelper.setItem("vcm_connection_config", config)
-  },
-
-  getSyncSettings: (): VCMSyncSettings => {
-    return LocalStorageHelper.getItem("vcm_sync_settings", {
-      includeDeprecated: false,
-      overwriteLocal: true,
-      syncOnStartup: false,
-      notifyOnSync: true,
-      batchSize: 10,
-      retryAttempts: 3,
-    })
-  },
-
-  saveSyncSettings: (settings: VCMSyncSettings): void => {
-    LocalStorageHelper.setItem("vcm_sync_settings", settings)
-  },
-
-  updateLastSync: (): void => {
-    const config = VCMConfigManager.getConfig()
-    config.lastSync = new Date().toISOString()
-    VCMConfigManager.saveConfig(config)
-  },
-
-  clearConfig: (): void => {
-    LocalStorageHelper.removeItem("vcm_connection_config")
-    LocalStorageHelper.removeItem("vcm_sync_settings")
-  },
-
-  isConfigured: (): boolean => {
-    const config = VCMConfigManager.getConfig()
-    return config.enabled && (config.useMockData || (!!config.baseUrl && !!config.apiKey))
-  },
-}
+import { VCMConfigManager, type VCMConnectionConfig, type VCMSyncSettings } from "@/lib/vcm-config"
+import { LocalStorageHelper } from "@/lib/local-storage-helper"
 
 interface VCMConnectionSetupProps {
   onConfigChange?: (isConfigured: boolean) => void
@@ -166,20 +66,34 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setIsMounted(true)
 
     // Load saved configuration
-    const savedConfig = VCMConfigManager.getConfig()
+    const savedConfig = VCMConfigManager.getConfig() || {
+      baseUrl: "https://v0-verifiable-credential-manager.vercel.app",
+      apiKey: "sl_b05t7b1r1nb",
+      organizationId: "",
+      enabled: false,
+      autoSync: false,
+      syncInterval: 60,
+      useMockData: false,
+    }
     setConfig(savedConfig)
 
     const savedSyncSettings = VCMConfigManager.getSyncSettings()
     setSyncSettings(savedSyncSettings)
 
-    onConfigChange?.(VCMConfigManager.isConfigured())
+    const isVCMConfigured = VCMConfigManager.isConfigured()
+    onConfigChange?.(isVCMConfigured)
   }, [onConfigChange])
 
   const handleConfigChange = (field: keyof VCMConnectionConfig, value: any) => {
     const newConfig = { ...config, [field]: value }
     setConfig(newConfig)
     VCMConfigManager.saveConfig(newConfig)
-    onConfigChange?.(VCMConfigManager.isConfigured())
+
+    // 設定変更後の状態をチェック
+    const isConfigured = VCMConfigManager.isConfigured()
+    console.log("Config changed, isConfigured:", isConfigured)
+    console.log("VCMConfigManager debug info:", VCMConfigManager.debugInfo())
+    onConfigChange?.(isConfigured)
   }
 
   const handleSyncSettingsChange = (field: keyof VCMSyncSettings, value: any) => {
@@ -515,7 +429,7 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
   }
 
   const getLocalTemplates = (): any[] => {
-    return LocalStorageHelper.getItem("vcm_synced_templates", [])
+    return VCMConfigManager.getSyncedTemplates()
   }
 
   const clearConfiguration = () => {
@@ -537,6 +451,12 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setConnectionDetails(null)
     setSyncResult(null)
     setIntegrationStatus(null)
+
+    const isVCMConfigured = () => {
+      const config = VCMConfigManager.getConfig()
+      return config && config.enabled && (config.useMockData || (!!config.baseUrl && !!config.apiKey))
+    }
+
     onConfigChange?.(false)
   }
 

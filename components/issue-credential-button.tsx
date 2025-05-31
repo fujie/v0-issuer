@@ -6,91 +6,143 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
-import { issueCredential } from "@/lib/credential-service"
-import { Loader2, Check, Download } from "lucide-react"
+import { CredentialTemplateSelectorEnhanced } from "./credential-template-selector-enhanced"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { CheckCircle, AlertCircle } from "lucide-react"
 
 interface IssueCredentialButtonProps {
   userId: string
 }
 
 export function IssueCredentialButton({ userId }: IssueCredentialButtonProps) {
-  const [isLoading, setIsLoading] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
-  const [credential, setCredential] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [result, setResult] = useState<{
+    success: boolean
+    message: string
+    credentialOffer?: any
+    error?: string
+  } | null>(null)
 
-  const handleIssue = async () => {
+  const handleTemplateSelect = async (templateId: string, selectedClaims: string[]) => {
+    console.log("Issuing credential with template:", templateId)
+    console.log("Selected claims:", selectedClaims)
+    console.log("User ID:", userId)
+
     setIsLoading(true)
-    setError(null)
+    setResult(null)
 
     try {
-      const result = await issueCredential(userId)
-      setCredential(result)
-      setIsOpen(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "証明書の発行に失敗しました")
+      const response = await fetch("/api/credential-offers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          templateId,
+          selectedClaims,
+        }),
+      })
+
+      const data = await response.json()
+      console.log("Credential offer response:", data)
+
+      if (response.ok && data.success) {
+        setResult({
+          success: true,
+          message: "証明書が正常に発行されました",
+          credentialOffer: data.credentialOffer,
+        })
+      } else {
+        setResult({
+          success: false,
+          message: data.message || "証明書の発行に失敗しました",
+          error: data.error,
+        })
+      }
+    } catch (error) {
+      console.error("Credential issuance error:", error)
+      setResult({
+        success: false,
+        message: "証明書の発行中にエラーが発生しました",
+        error: error instanceof Error ? error.message : "Unknown error",
+      })
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleDownload = () => {
-    if (!credential) return
-
-    const blob = new Blob([credential], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "student-credential.json"
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+  const handleClose = () => {
+    setIsOpen(false)
+    setResult(null)
+    setIsLoading(false)
   }
 
   return (
-    <>
-      <Button onClick={handleIssue} disabled={isLoading} className="w-full">
-        {isLoading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            発行中...
-          </>
-        ) : (
-          "学生証明書を発行する"
-        )}
-      </Button>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <Button className="w-full">証明書を発行</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>証明書の発行</DialogTitle>
+          <DialogDescription>発行する証明書のテンプレートを選択し、開示する情報を設定してください。</DialogDescription>
+        </DialogHeader>
 
-      {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
+        <div className="space-y-6">
+          {result && (
+            <Alert variant={result.success ? "default" : "destructive"}>
+              {result.success ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              <AlertDescription>
+                <div>
+                  <p>{result.message}</p>
+                  {result.error && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-sm">エラー詳細</summary>
+                      <pre className="mt-1 text-xs bg-gray-100 p-2 rounded overflow-auto">{result.error}</pre>
+                    </details>
+                  )}
+                  {result.credentialOffer && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-sm">発行された証明書情報</summary>
+                      <pre className="mt-1 text-xs bg-gray-100 p-2 rounded overflow-auto">
+                        {JSON.stringify(result.credentialOffer, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
 
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center">
-              <Check className="h-5 w-5 text-green-500 mr-2" />
-              証明書が発行されました
-            </DialogTitle>
-            <DialogDescription>
-              SD-JWT形式の学生証明書が正常に発行されました。ダウンロードして保存してください。
-            </DialogDescription>
-          </DialogHeader>
+          {!result && (
+            <CredentialTemplateSelectorEnhanced onTemplateSelect={handleTemplateSelect} isLoading={isLoading} />
+          )}
 
-          <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-60">
-            <pre className="text-xs">{credential}</pre>
-          </div>
-
-          <DialogFooter>
-            <Button onClick={handleDownload} className="w-full">
-              <Download className="mr-2 h-4 w-4" />
-              証明書をダウンロード
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+          {result && (
+            <div className="flex justify-end space-x-2">
+              <Button variant="outline" onClick={handleClose}>
+                閉じる
+              </Button>
+              {result.success && (
+                <Button
+                  onClick={() => {
+                    setResult(null)
+                    setIsLoading(false)
+                  }}
+                >
+                  別の証明書を発行
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

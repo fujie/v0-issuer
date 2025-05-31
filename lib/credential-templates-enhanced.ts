@@ -11,18 +11,35 @@ export interface EnhancedCredentialTemplate extends CredentialTemplate {
 
 export class CredentialTemplateManager {
   private static SYNCED_TEMPLATES_KEY = "vcm_synced_templates"
+  private static cachedTemplates: EnhancedCredentialTemplate[] | null = null
+  private static lastCacheTime = 0
+  private static CACHE_TTL = 30000 // 30秒キャッシュ
 
   private static isClient(): boolean {
     return typeof window !== "undefined"
   }
 
   static async getAllTemplates(): Promise<EnhancedCredentialTemplate[]> {
+    console.log("CredentialTemplateManager.getAllTemplates called")
+
+    // キャッシュが有効な場合はキャッシュを返す
+    const now = Date.now()
+    if (this.cachedTemplates && now - this.lastCacheTime < this.CACHE_TTL) {
+      console.log("Returning cached templates:", this.cachedTemplates.length)
+      return this.cachedTemplates
+    }
+
     const staticTemplatesEnhanced: EnhancedCredentialTemplate[] = staticTemplates.map((template) => ({
       ...template,
       source: "static" as const,
     }))
 
     const syncedTemplates = this.getSyncedTemplates()
+    console.log("Synced templates loaded:", syncedTemplates.length)
+    console.log(
+      "Synced templates details:",
+      syncedTemplates.map((t) => ({ id: t.id, name: t.name, source: t.source })),
+    )
 
     // Combine static and synced templates, avoiding duplicates
     const allTemplates = [...staticTemplatesEnhanced]
@@ -32,11 +49,23 @@ export class CredentialTemplateManager {
       const existingIndex = allTemplates.findIndex((t) => t.id === syncedTemplate.id)
       if (existingIndex >= 0) {
         // Replace static template with synced version if it exists
+        console.log("Replacing static template with synced version:", syncedTemplate.id)
         allTemplates[existingIndex] = syncedTemplate
       } else {
         // Add new synced template
+        console.log("Adding new synced template:", syncedTemplate.id)
         allTemplates.push(syncedTemplate)
       }
+    })
+
+    // キャッシュを更新
+    this.cachedTemplates = allTemplates
+    this.lastCacheTime = now
+
+    console.log("All templates combined:", allTemplates.length)
+    console.log("Template breakdown:", {
+      static: allTemplates.filter((t) => t.source === "static").length,
+      vcm: allTemplates.filter((t) => t.source === "vcm").length,
     })
 
     return allTemplates
@@ -44,12 +73,26 @@ export class CredentialTemplateManager {
 
   static getSyncedTemplates(): EnhancedCredentialTemplate[] {
     if (!this.isClient()) {
+      console.log("getSyncedTemplates: Not in client environment, returning empty array")
       return []
     }
 
     try {
-      const stored = localStorage.getItem(this.SYNCED_TEMPLATES_KEY)
-      return stored ? JSON.parse(stored) : []
+      // 統一されたVCMConfigManagerを使用
+      const templates = VCMConfigManager.getSyncedTemplates()
+      console.log("getSyncedTemplates: Loaded templates from VCMConfigManager:", templates.length)
+
+      // テンプレートの詳細をログ出力
+      templates.forEach((template) => {
+        console.log("Synced template:", {
+          id: template.id,
+          name: template.name,
+          source: template.source,
+          lastSynced: template.lastSynced,
+        })
+      })
+
+      return templates
     } catch (error) {
       console.error("Failed to load synced templates:", error)
       return []
@@ -58,11 +101,20 @@ export class CredentialTemplateManager {
 
   static saveSyncedTemplates(templates: EnhancedCredentialTemplate[]): void {
     if (!this.isClient()) {
+      console.log("saveSyncedTemplates: Not in client environment, skipping save")
       return
     }
 
     try {
+      console.log("saveSyncedTemplates: Saving templates:", templates.length)
+
+      // 統一されたlocalStorageキーを使用
       localStorage.setItem(this.SYNCED_TEMPLATES_KEY, JSON.stringify(templates))
+
+      // キャッシュを無効化して次回の読み込みで最新データを取得
+      this.cachedTemplates = null
+
+      console.log("saveSyncedTemplates: Templates saved successfully")
     } catch (error) {
       console.error("Failed to save synced templates:", error)
     }
@@ -74,8 +126,10 @@ export class CredentialTemplateManager {
     errors: string[]
     templates: EnhancedCredentialTemplate[]
   }> {
+    console.log("CredentialTemplateManager.syncFromVCM called")
     const config = VCMConfigManager.getConfig()
     if (!config || !config.enabled) {
+      console.log("VCM integration not enabled")
       return {
         success: false,
         synced: 0,
@@ -86,26 +140,37 @@ export class CredentialTemplateManager {
 
     try {
       // Use VCMBrowserClient for browser-safe operations
-      const client = new VCMBrowserClient(config, true) // Use mock data for demo
+      console.log("Creating VCMBrowserClient with config:", { ...config, apiKey: "[REDACTED]" })
+      const client = new VCMBrowserClient(config, config.useMockData ?? false)
+      console.log("Fetching credential types from VCM")
       const vcmTypes = await client.getCredentialTypes()
+      console.log("Received credential types from VCM:", vcmTypes.length)
 
       const syncedTemplates: EnhancedCredentialTemplate[] = []
       const errors: string[] = []
 
       for (const vcmType of vcmTypes) {
         try {
+          console.log("Converting VCM type to template:", vcmType.id)
           const template = this.convertVCMTypeToTemplate(vcmType)
           syncedTemplates.push(template)
         } catch (error) {
-          errors.push(`Failed to convert ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`)
+          const errorMsg = `Failed to convert ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`
+          console.error(errorMsg)
+          errors.push(errorMsg)
         }
       }
 
       // Save synced templates
+      console.log("Saving synced templates:", syncedTemplates.length)
       this.saveSyncedTemplates(syncedTemplates)
 
       // Update last sync time
+      console.log("Updating last sync time")
       VCMConfigManager.updateLastSync()
+
+      // キャッシュを無効化
+      this.cachedTemplates = null
 
       return {
         success: errors.length === 0,
@@ -114,6 +179,7 @@ export class CredentialTemplateManager {
         templates: syncedTemplates,
       }
     } catch (error) {
+      console.error("VCM sync error:", error)
       return {
         success: false,
         synced: 0,
@@ -124,33 +190,48 @@ export class CredentialTemplateManager {
   }
 
   private static convertVCMTypeToTemplate(vcmType: any): EnhancedCredentialTemplate {
-    const claims = Object.entries(vcmType.schema.properties).map(([key, property]: [string, any]) => ({
-      key,
-      name: property.title,
-      description: property.description,
-      type: this.mapSchemaTypeToClaimType(property.type, property.format),
-      required: vcmType.schema.required.includes(key),
-      selectiveDisclosure: property.selectiveDisclosure || false,
-      defaultValue: property.default,
-      enum: property.enum,
-    }))
+    console.log("Converting VCM type to template:", vcmType.id)
+    console.log("VCM type schema:", vcmType.schema)
+
+    const claims = Object.entries(vcmType.schema?.properties || {}).map(([key, property]: [string, any]) => {
+      // VCMテンプレートでは、デフォルトで多くの項目を選択的開示にする
+      const isSelectiveDisclosure = property.selectiveDisclosure !== false && !["id", "type", "@context"].includes(key) // 基本的なVC項目は除外
+
+      console.log(`Claim ${key}: selectiveDisclosure = ${isSelectiveDisclosure}`)
+
+      return {
+        key,
+        name: property.title || key,
+        description: property.description || `${key} field`,
+        type: this.mapSchemaTypeToClaimType(property.type, property.format),
+        required: (vcmType.schema?.required || []).includes(key),
+        selectiveDisclosure: isSelectiveDisclosure,
+        defaultValue: property.default,
+        enum: property.enum,
+      }
+    })
+
+    console.log(
+      "Converted claims:",
+      claims.map((c) => ({ key: c.key, selectiveDisclosure: c.selectiveDisclosure })),
+    )
 
     return {
       id: vcmType.id,
-      name: vcmType.display.name,
-      description: vcmType.display.description,
-      type: vcmType.issuanceConfig.type,
-      context: vcmType.issuanceConfig.context,
+      name: vcmType.display?.name || vcmType.name || vcmType.id,
+      description: vcmType.display?.description || vcmType.description || "",
+      type: vcmType.issuanceConfig?.type || ["VerifiableCredential"],
+      context: vcmType.issuanceConfig?.context || ["https://www.w3.org/2018/credentials/v1"],
       claims,
       display: {
-        name: vcmType.display.name,
-        locale: vcmType.display.locale,
-        backgroundColor: vcmType.display.backgroundColor,
-        textColor: vcmType.display.textColor,
-        logo: vcmType.display.logo,
+        name: vcmType.display?.name || vcmType.name || vcmType.id,
+        locale: vcmType.display?.locale || "ja-JP",
+        backgroundColor: vcmType.display?.backgroundColor || "#1e40af",
+        textColor: vcmType.display?.textColor || "#ffffff",
+        logo: vcmType.display?.logo,
       },
-      validityPeriod: vcmType.issuanceConfig.validityPeriod,
-      issuer: vcmType.issuanceConfig.issuer,
+      validityPeriod: vcmType.issuanceConfig?.validityPeriod || 365,
+      issuer: vcmType.issuanceConfig?.issuer || "https://university.example.com",
       source: "vcm" as const,
       vcmId: vcmType.id,
       lastSynced: new Date().toISOString(),
@@ -176,14 +257,21 @@ export class CredentialTemplateManager {
   }
 
   static async getTemplate(templateId: string): Promise<EnhancedCredentialTemplate | undefined> {
+    console.log("getTemplate called for:", templateId)
     const allTemplates = await this.getAllTemplates()
-    return allTemplates.find((template) => template.id === templateId)
+    const template = allTemplates.find((template) => template.id === templateId)
+    console.log("Template found:", template ? "yes" : "no")
+    return template
   }
 
   static clearSyncedTemplates(): void {
+    console.log("clearSyncedTemplates called")
     if (this.isClient()) {
       try {
         localStorage.removeItem(this.SYNCED_TEMPLATES_KEY)
+        // キャッシュを無効化
+        this.cachedTemplates = null
+        console.log("Synced templates cleared")
       } catch (error) {
         console.error("Failed to clear synced templates:", error)
       }
@@ -191,7 +279,40 @@ export class CredentialTemplateManager {
   }
 
   static async refreshTemplates(): Promise<EnhancedCredentialTemplate[]> {
-    // Force refresh by re-reading from storage
+    console.log("refreshTemplates called")
+    // キャッシュを無効化して強制的に再読み込み
+    this.cachedTemplates = null
     return this.getAllTemplates()
+  }
+
+  // デバッグ用メソッド
+  static getDebugInfo(): any {
+    const syncedTemplates = this.getSyncedTemplates()
+    const config = VCMConfigManager.getConfig()
+
+    return {
+      isClient: this.isClient(),
+      syncedTemplatesKey: this.SYNCED_TEMPLATES_KEY,
+      syncedTemplatesCount: syncedTemplates.length,
+      syncedTemplates: syncedTemplates.map((t) => ({
+        id: t.id,
+        name: t.name,
+        source: t.source,
+        lastSynced: t.lastSynced,
+      })),
+      vcmConfig: config
+        ? {
+            enabled: config.enabled,
+            useMockData: config.useMockData,
+            lastSync: config.lastSync,
+          }
+        : null,
+      cacheInfo: {
+        hasCachedTemplates: !!this.cachedTemplates,
+        cachedCount: this.cachedTemplates?.length || 0,
+        lastCacheTime: this.lastCacheTime,
+        cacheAge: Date.now() - this.lastCacheTime,
+      },
+    }
   }
 }

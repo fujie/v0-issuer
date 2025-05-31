@@ -30,6 +30,27 @@ export default function AdminPage() {
 
   useEffect(() => {
     setIsMounted(true)
+
+    // VCM設定の詳細をログ出力
+    const config = typeof window !== "undefined" ? localStorage.getItem("vcm_connection_config") : null
+    console.log("=== Admin Page VCM Config Debug ===")
+    console.log("Raw config from localStorage:", config)
+
+    if (config) {
+      try {
+        const parsedConfig = JSON.parse(config)
+        console.log("Parsed config:", {
+          enabled: parsedConfig.enabled,
+          useMockData: parsedConfig.useMockData,
+          hasBaseUrl: !!parsedConfig.baseUrl,
+          hasApiKey: !!parsedConfig.apiKey,
+        })
+      } catch (e) {
+        console.error("Failed to parse config:", e)
+      }
+    }
+
+    console.log("====================================")
   }, [])
 
   if (!isMounted) {

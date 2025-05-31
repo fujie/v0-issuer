@@ -20,6 +20,7 @@ import {
   HardDrive,
   AlertCircle,
   Loader2,
+  Info,
 } from "lucide-react"
 
 interface CredentialTemplateSelectorEnhancedProps {
@@ -37,15 +38,45 @@ export function CredentialTemplateSelectorEnhanced({
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"all" | "static" | "vcm">("all")
+  const [debugInfo, setDebugInfo] = useState<string | null>(null)
 
   const loadTemplates = async () => {
+    console.log("Loading templates...")
     setIsRefreshing(true)
     setError(null)
 
     try {
+      // デバッグ情報を取得
+      const debugInfo = CredentialTemplateManager.getDebugInfo()
+      console.log("CredentialTemplateManager debug info:", debugInfo)
+
       const allTemplates = await CredentialTemplateManager.getAllTemplates()
+      console.log("Templates loaded:", allTemplates.length)
       setTemplates(allTemplates)
+
+      // デバッグ情報を設定
+      const vcmTemplates = allTemplates.filter((t) => t.source === "vcm")
+      const staticTemplates = allTemplates.filter((t) => t.source === "static")
+
+      const selectedTemplateObj = allTemplates.find((t) => t.id === selectedTemplate)
+      const selectiveDisclosureClaims = selectedTemplateObj?.claims.filter((c) => c.selectiveDisclosure) || []
+
+      setDebugInfo(`
+  読み込まれたテンプレート: ${allTemplates.length}件
+  - ローカル: ${staticTemplates.length}件
+  - VCM: ${vcmTemplates.length}件
+  
+  VCMテンプレートID: ${vcmTemplates.map((t) => t.id).join(", ")}
+  
+  選択されたテンプレート: ${selectedTemplate || "なし"}
+  選択的開示項目数: ${selectiveDisclosureClaims.length}
+  選択されたクレーム数: ${selectedClaims[selectedTemplate || ""]?.length || 0}
+  
+  詳細デバッグ情報:
+  ${JSON.stringify(debugInfo, null, 2)}
+`)
     } catch (err) {
+      console.error("Failed to load templates:", err)
       setError(err instanceof Error ? err.message : "テンプレートの読み込みに失敗しました")
     } finally {
       setIsRefreshing(false)
@@ -53,18 +84,22 @@ export function CredentialTemplateSelectorEnhanced({
   }
 
   const syncFromVCM = async () => {
+    console.log("Syncing from VCM...")
     setIsRefreshing(true)
     setError(null)
 
     try {
       const result = await CredentialTemplateManager.syncFromVCM()
+      console.log("Sync result:", result)
 
       if (result.success) {
+        console.log("Sync successful, reloading templates...")
         await loadTemplates()
       } else {
         setError(`同期エラー: ${result.errors.join(", ")}`)
       }
     } catch (err) {
+      console.error("Sync error:", err)
       setError(err instanceof Error ? err.message : "VCMとの同期に失敗しました")
     } finally {
       setIsRefreshing(false)
@@ -72,6 +107,7 @@ export function CredentialTemplateSelectorEnhanced({
   }
 
   useEffect(() => {
+    console.log("Initial template load")
     loadTemplates()
   }, [])
 
@@ -101,12 +137,20 @@ export function CredentialTemplateSelectorEnhanced({
   }
 
   const handleTemplateSelect = (template: EnhancedCredentialTemplate) => {
+    console.log("Template selected:", template.id)
+    console.log(
+      "Template claims:",
+      template.claims.map((c) => ({ key: c.key, selectiveDisclosure: c.selectiveDisclosure })),
+    )
     setSelectedTemplate(template.id)
 
     const selectiveDisclosureClaims = template.claims
       .filter((claim) => claim.selectiveDisclosure)
       .map((claim) => claim.key)
 
+    console.log("Selective disclosure claims:", selectiveDisclosureClaims)
+
+    // 選択的開示項目がある場合はすべて選択、ない場合は空配列
     setSelectedClaims((prev) => ({
       ...prev,
       [template.id]: selectiveDisclosureClaims,
@@ -127,6 +171,8 @@ export function CredentialTemplateSelectorEnhanced({
 
   const handleIssue = () => {
     if (selectedTemplate) {
+      console.log("Issuing credential with template:", selectedTemplate)
+      console.log("Selected claims:", selectedClaims[selectedTemplate] || [])
       onTemplateSelect(selectedTemplate, selectedClaims[selectedTemplate] || [])
     }
   }
@@ -171,6 +217,18 @@ export function CredentialTemplateSelectorEnhanced({
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {debugInfo && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            <details>
+              <summary className="cursor-pointer">テンプレート読み込み情報</summary>
+              <pre className="mt-2 text-xs whitespace-pre-wrap">{debugInfo}</pre>
+            </details>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -374,7 +432,13 @@ export function CredentialTemplateSelectorEnhanced({
         <div className="flex justify-end">
           <Button
             onClick={handleIssue}
-            disabled={isLoading || !selectedClaims[selectedTemplate]?.length}
+            disabled={
+              isLoading ||
+              // 選択的開示項目がある場合は、少なくとも1つ選択されている必要がある
+              // 選択的開示項目がない場合は、常に発行可能
+              (templates.find((t) => t.id === selectedTemplate)?.claims.some((c) => c.selectiveDisclosure) &&
+                !selectedClaims[selectedTemplate]?.length)
+            }
             className="min-w-[200px]"
           >
             {isLoading ? "発行中..." : "選択した証明書を発行"}
