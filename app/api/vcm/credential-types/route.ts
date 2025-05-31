@@ -1,14 +1,43 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// 完全にサーバーサイド専用の実装 - localStorage は一切使用しない
+// デバッグ用のログ関数
+function debugLog(message: string, data?: any) {
+  const timestamp = new Date().toISOString()
+  console.log(`[VCM-API ${timestamp}] ${message}`)
+  if (data) {
+    console.log(`[VCM-API ${timestamp}] Data:`, JSON.stringify(data, null, 2))
+  }
+}
 
-// フォールバック用のモックデータ
-const FALLBACK_CREDENTIAL_TYPES = [
+// リクエスト詳細を記録する関数
+function logRequestDetails(request: NextRequest, params: URLSearchParams) {
+  debugLog("=== VCM Credential Types API Request ===")
+  debugLog(`Method: ${request.method}`)
+  debugLog(`URL: ${request.url}`)
+  debugLog(`Headers:`, Object.fromEntries(request.headers.entries()))
+  debugLog(`Query Parameters:`, Object.fromEntries(params.entries()))
+  debugLog("==========================================")
+}
+
+// レスポンス詳細を記録する関数
+function logResponseDetails(status: number, data: any, error?: any) {
+  debugLog("=== VCM Credential Types API Response ===")
+  debugLog(`Status: ${status}`)
+  debugLog(`Response Data:`, data)
+  if (error) {
+    debugLog(`Error:`, error)
+  }
+  debugLog("==========================================")
+}
+
+// モックデータ
+const MOCK_CREDENTIAL_TYPES = [
   {
-    id: "fallback-student-id",
-    name: "学生証（フォールバック）",
-    description: "VCM接続失敗時のフォールバックデータ",
+    id: "student-id-card",
+    name: "学生証",
+    description: "大学の学生証明書",
     version: "1.0.0",
+    status: "active",
     schema: {
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
@@ -17,56 +46,60 @@ const FALLBACK_CREDENTIAL_TYPES = [
           type: "string",
           title: "学籍番号",
           description: "学生の学籍番号",
+          selectiveDisclosure: false,
         },
-        name: {
+        fullName: {
           type: "string",
           title: "氏名",
           description: "学生の氏名",
-        },
-        email: {
-          type: "string",
-          title: "メールアドレス",
-          description: "学生のメールアドレス",
-          format: "email",
+          selectiveDisclosure: true,
         },
         department: {
           type: "string",
           title: "学部",
           description: "所属学部",
+          selectiveDisclosure: true,
         },
-        year: {
+        enrollmentYear: {
           type: "integer",
-          title: "学年",
-          description: "現在の学年",
+          title: "入学年度",
+          description: "入学した年度",
+          selectiveDisclosure: true,
+        },
+        graduationYear: {
+          type: "integer",
+          title: "卒業予定年度",
+          description: "卒業予定の年度",
+          selectiveDisclosure: true,
         },
       },
-      required: ["studentId", "name"],
+      required: ["studentId", "fullName", "department"],
       additionalProperties: false,
     },
     display: {
-      name: "学生証（フォールバック）",
-      description: "VCM接続失敗時のフォールバックデータ",
+      name: "学生証",
+      description: "大学の学生証明書",
       locale: "ja-JP",
-      backgroundColor: "#6b7280",
+      backgroundColor: "#1e40af",
       textColor: "#ffffff",
     },
     issuanceConfig: {
-      validityPeriod: 365,
-      issuer: "https://fallback.example.com",
+      validityPeriod: 1460, // 4年
+      issuer: "https://university.example.com",
       context: ["https://www.w3.org/2018/credentials/v1"],
       type: ["VerifiableCredential", "StudentIDCredential"],
       revocable: true,
       batchIssuance: false,
     },
-    createdAt: "2024-01-01T00:00:00.000Z",
-    updatedAt: "2024-01-01T00:00:00.000Z",
-    status: "active",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
-    id: "fallback-course-completion",
-    name: "コース修了証（フォールバック）",
-    description: "コース修了証明書のフォールバックデータ",
+    id: "academic-transcript",
+    name: "成績証明書",
+    description: "学業成績の証明書",
     version: "1.0.0",
+    status: "active",
     schema: {
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
@@ -75,197 +108,279 @@ const FALLBACK_CREDENTIAL_TYPES = [
           type: "string",
           title: "学籍番号",
           description: "学生の学籍番号",
+          selectiveDisclosure: false,
         },
-        courseName: {
+        fullName: {
           type: "string",
-          title: "コース名",
-          description: "修了したコース名",
+          title: "氏名",
+          description: "学生の氏名",
+          selectiveDisclosure: true,
         },
-        completionDate: {
-          type: "string",
-          title: "修了日",
-          description: "コース修了日",
-          format: "date",
+        gpa: {
+          type: "number",
+          title: "GPA",
+          description: "累積GPA",
+          selectiveDisclosure: true,
         },
-        grade: {
-          type: "string",
-          title: "成績",
-          description: "取得成績",
-          enum: ["A", "B", "C", "D", "F"],
+        totalCredits: {
+          type: "integer",
+          title: "取得単位数",
+          description: "取得した総単位数",
+          selectiveDisclosure: true,
+        },
+        courses: {
+          type: "array",
+          title: "履修科目",
+          description: "履修した科目一覧",
+          selectiveDisclosure: true,
         },
       },
-      required: ["studentId", "courseName", "completionDate"],
+      required: ["studentId", "fullName"],
       additionalProperties: false,
     },
     display: {
-      name: "コース修了証（フォールバック）",
-      description: "コース修了証明書のフォールバックデータ",
+      name: "成績証明書",
+      description: "学業成績の証明書",
       locale: "ja-JP",
       backgroundColor: "#059669",
       textColor: "#ffffff",
     },
     issuanceConfig: {
-      validityPeriod: 1095,
-      issuer: "https://fallback.example.com",
+      validityPeriod: 365,
+      issuer: "https://university.example.com",
       context: ["https://www.w3.org/2018/credentials/v1"],
-      type: ["VerifiableCredential", "CourseCompletionCredential"],
+      type: ["VerifiableCredential", "AcademicTranscriptCredential"],
       revocable: false,
       batchIssuance: true,
     },
-    createdAt: "2024-01-01T00:00:00.000Z",
-    updatedAt: "2024-01-01T00:00:00.000Z",
-    status: "active",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
 ]
 
 export async function GET(request: NextRequest) {
+  const startTime = Date.now()
+
   try {
     const { searchParams } = new URL(request.url)
+
+    // リクエスト詳細をログ出力
+    logRequestDetails(request, searchParams)
+
     const baseUrl = searchParams.get("baseUrl")
     const apiKey = searchParams.get("apiKey")
     const useMockData = searchParams.get("useMockData") === "true"
 
-    // パラメータの検証
-    if (!baseUrl || !apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "baseUrlとapiKeyが必要です",
-          error: "MISSING_PARAMETERS",
-        },
-        { status: 400 },
-      )
-    }
-
-    // デモモードの場合はフォールバックデータを返す
-    if (useMockData) {
-      return NextResponse.json({
-        success: true,
-        credentialTypes: FALLBACK_CREDENTIAL_TYPES,
-        message: "デモモード: フォールバックデータを使用",
-        mode: "demo",
-      })
-    }
-
-    // 実際のVCM APIへの接続を試行
-    try {
-      const vcmEndpoint = `${baseUrl}/api/credential-types`
-
-      const response = await fetch(vcmEndpoint, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          Authorization: `Bearer ${apiKey}`,
-          "User-Agent": "Student-Login-Site/1.0",
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(15000),
-      })
-
-      if (!response.ok) {
-        // VCM APIエラー
-        return NextResponse.json({
-          success: true,
-          credentialTypes: FALLBACK_CREDENTIAL_TYPES,
-          message: `VCM APIエラー (${response.status}). フォールバックデータを使用しています。`,
-          mode: "fallback",
-          errorDetails: {
-            type: "VCM_API_ERROR",
-            httpStatus: response.status,
-            httpStatusText: response.statusText,
-          },
-        })
-      }
-
-      const responseText = await response.text()
-      let vcmData
-
-      try {
-        vcmData = JSON.parse(responseText)
-      } catch (parseError) {
-        return NextResponse.json({
-          success: true,
-          credentialTypes: FALLBACK_CREDENTIAL_TYPES,
-          message: "VCM APIのレスポンスが無効なJSON形式でした。フォールバックデータを使用しています。",
-          mode: "fallback",
-          errorDetails: {
-            type: "INVALID_JSON_RESPONSE",
-          },
-        })
-      }
-
-      const credentialTypes = vcmData.credentialTypes || vcmData.data || []
-
-      if (Array.isArray(credentialTypes) && credentialTypes.length > 0) {
-        return NextResponse.json({
-          success: true,
-          credentialTypes: credentialTypes,
-          message: `VCM APIから${credentialTypes.length}個のクレデンシャルタイプを取得しました`,
-          mode: "vcm",
-        })
-      } else {
-        return NextResponse.json({
-          success: true,
-          credentialTypes: FALLBACK_CREDENTIAL_TYPES,
-          message: "VCM APIからデータが取得できませんでした。フォールバックデータを使用しています。",
-          mode: "fallback",
-          errorDetails: {
-            type: "EMPTY_OR_INVALID_DATA",
-          },
-        })
-      }
-    } catch (fetchError) {
-      const errorMessage = fetchError instanceof Error ? fetchError.message : "Unknown error"
-
-      return NextResponse.json({
-        success: true,
-        credentialTypes: FALLBACK_CREDENTIAL_TYPES,
-        message: `VCM API接続エラー: ${errorMessage}. フォールバックデータを使用しています。`,
-        mode: "fallback",
-        errorDetails: {
-          type: "NETWORK_ERROR",
-          errorMessage,
-        },
-      })
-    }
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "クレデンシャルタイプの取得中にエラーが発生しました",
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { baseUrl, apiKey, useMockData } = body
-
-    // GETと同じロジックを使用するため、URLパラメータに変換
-    const url = new URL(request.url)
-    url.searchParams.set("baseUrl", baseUrl)
-    url.searchParams.set("apiKey", apiKey)
-    url.searchParams.set("useMockData", useMockData?.toString() || "false")
-
-    const getRequest = new Request(url.toString(), {
-      method: "GET",
-      headers: request.headers,
+    debugLog("Parsed parameters:", {
+      baseUrl,
+      apiKey: apiKey ? `${apiKey.substring(0, 8)}...` : null,
+      useMockData,
     })
 
-    return GET(getRequest as NextRequest)
-  } catch (error) {
-    return NextResponse.json(
-      {
+    // パラメータ検証
+    if (!useMockData && (!baseUrl || !apiKey)) {
+      const errorResponse = {
         success: false,
-        message: "クレデンシャルタイプの取得中にエラーが発生しました",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Missing required parameters",
+        message: "baseUrl and apiKey are required when not using mock data",
+        debugInfo: {
+          receivedParams: {
+            baseUrl: !!baseUrl,
+            apiKey: !!apiKey,
+            useMockData,
+          },
+          timestamp: new Date().toISOString(),
+          requestId: `req_${Date.now()}`,
+        },
+      }
+
+      logResponseDetails(400, errorResponse)
+      return NextResponse.json(errorResponse, { status: 400 })
+    }
+
+    // モックデータモード
+    if (useMockData) {
+      debugLog("Using mock data mode")
+
+      const mockResponse = {
+        success: true,
+        credentialTypes: MOCK_CREDENTIAL_TYPES,
+        mode: "mock",
+        debugInfo: {
+          source: "mock-data",
+          count: MOCK_CREDENTIAL_TYPES.length,
+          timestamp: new Date().toISOString(),
+          responseTime: Date.now() - startTime,
+          requestId: `req_${Date.now()}`,
+        },
+      }
+
+      logResponseDetails(200, mockResponse)
+      return NextResponse.json(mockResponse)
+    }
+
+    // 実際のVCM接続モード
+    debugLog("Attempting real VCM connection")
+
+    const vcmEndpoint = `${baseUrl}/api/credential-types`
+    const requestHeaders = {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      "User-Agent": "Student-Login-Site/1.0",
+    }
+
+    debugLog("VCM Request Details:", {
+      endpoint: vcmEndpoint,
+      headers: {
+        ...requestHeaders,
+        "X-API-Key": `${apiKey.substring(0, 8)}...`,
+        Authorization: `Bearer ${apiKey.substring(0, 8)}...`,
       },
-      { status: 500 },
-    )
+      method: "GET",
+    })
+
+    const vcmRequestStart = Date.now()
+
+    let vcmResponse: Response
+    let vcmData: any
+    let connectionError: any = null
+
+    try {
+      debugLog(`Making request to VCM: ${vcmEndpoint}`)
+
+      vcmResponse = await fetch(vcmEndpoint, {
+        method: "GET",
+        headers: requestHeaders,
+        signal: AbortSignal.timeout(10000), // 10秒タイムアウト
+      })
+
+      const vcmResponseTime = Date.now() - vcmRequestStart
+
+      debugLog("VCM Response received:", {
+        status: vcmResponse.status,
+        statusText: vcmResponse.statusText,
+        headers: Object.fromEntries(vcmResponse.headers.entries()),
+        responseTime: vcmResponseTime,
+      })
+
+      if (!vcmResponse.ok) {
+        const errorText = await vcmResponse.text()
+        debugLog("VCM Response Error Text:", errorText)
+
+        throw new Error(`VCM API returned ${vcmResponse.status}: ${vcmResponse.statusText}. Response: ${errorText}`)
+      }
+
+      vcmData = await vcmResponse.json()
+      debugLog("VCM Response Data:", vcmData)
+    } catch (fetchError) {
+      connectionError = fetchError
+      debugLog("VCM Connection Error:", {
+        error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        stack: fetchError instanceof Error ? fetchError.stack : undefined,
+        endpoint: vcmEndpoint,
+        responseTime: Date.now() - vcmRequestStart,
+      })
+
+      // フォールバック: モックデータを返す
+      debugLog("Falling back to mock data due to VCM connection error")
+
+      const fallbackResponse = {
+        success: true,
+        credentialTypes: MOCK_CREDENTIAL_TYPES,
+        mode: "fallback-mock",
+        debugInfo: {
+          source: "fallback-after-error",
+          originalError: fetchError instanceof Error ? fetchError.message : String(fetchError),
+          attemptedEndpoint: vcmEndpoint,
+          count: MOCK_CREDENTIAL_TYPES.length,
+          timestamp: new Date().toISOString(),
+          responseTime: Date.now() - startTime,
+          requestId: `req_${Date.now()}`,
+        },
+        errorDetails: {
+          type: "VCM_CONNECTION_ERROR",
+          httpStatus: vcmResponse?.status,
+          errorMessage: fetchError instanceof Error ? fetchError.message : String(fetchError),
+          connectionDetails: {
+            endpoint: vcmEndpoint,
+            method: "GET",
+            headers: {
+              ...requestHeaders,
+              "X-API-Key": `${apiKey.substring(0, 8)}...`,
+              Authorization: `Bearer ${apiKey.substring(0, 8)}...`,
+            },
+          },
+          responseTime: Date.now() - vcmRequestStart,
+          troubleshooting: [
+            "VCMサーバーが起動していることを確認してください",
+            "ネットワーク接続を確認してください",
+            "API Keyが正しいことを確認してください",
+            "VCMサーバーのログを確認してください",
+            "デモモードの使用を検討してください",
+          ],
+        },
+      }
+
+      logResponseDetails(200, fallbackResponse, connectionError)
+      return NextResponse.json(fallbackResponse)
+    }
+
+    // VCM接続成功
+    let credentialTypes: any[] = []
+
+    if (Array.isArray(vcmData)) {
+      credentialTypes = vcmData
+    } else if (vcmData.credentialTypes && Array.isArray(vcmData.credentialTypes)) {
+      credentialTypes = vcmData.credentialTypes
+    } else if (vcmData.data && Array.isArray(vcmData.data)) {
+      credentialTypes = vcmData.data
+    } else if (vcmData.items && Array.isArray(vcmData.items)) {
+      credentialTypes = vcmData.items
+    } else {
+      debugLog("Unexpected VCM response format, using empty array:", vcmData)
+      credentialTypes = []
+    }
+
+    const successResponse = {
+      success: true,
+      credentialTypes,
+      mode: "vcm",
+      debugInfo: {
+        source: "vcm-server",
+        endpoint: vcmEndpoint,
+        count: credentialTypes.length,
+        timestamp: new Date().toISOString(),
+        responseTime: Date.now() - startTime,
+        vcmResponseTime: Date.now() - vcmRequestStart,
+        requestId: `req_${Date.now()}`,
+        vcmResponseFormat: {
+          isArray: Array.isArray(vcmData),
+          hasCredentialTypes: !!vcmData.credentialTypes,
+          hasData: !!vcmData.data,
+          hasItems: !!vcmData.items,
+          keys: Object.keys(vcmData),
+        },
+      },
+    }
+
+    logResponseDetails(200, successResponse)
+    return NextResponse.json(successResponse)
+  } catch (error) {
+    const errorResponse = {
+      success: false,
+      error: "Failed to fetch credential types",
+      message: error instanceof Error ? error.message : "Unknown error occurred",
+      debugInfo: {
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString(),
+        responseTime: Date.now() - startTime,
+        requestId: `req_${Date.now()}`,
+      },
+    }
+
+    logResponseDetails(500, errorResponse, error)
+    return NextResponse.json(errorResponse, { status: 500 })
   }
 }

@@ -325,7 +325,13 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
     setSyncResult(null)
 
     try {
-      console.log("Starting credential types sync...")
+      console.log("=== Starting credential types sync ===")
+      console.log("Config:", {
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey ? `${config.apiKey.substring(0, 8)}...` : null,
+        useMockData: config.useMockData,
+        enabled: config.enabled,
+      })
 
       // API経由でクレデンシャルタイプを取得
       const params = new URLSearchParams({
@@ -334,26 +340,42 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
         useMockData: config.useMockData.toString(),
       })
 
-      const response = await fetch(`/api/vcm/credential-types?${params}`, {
+      const requestUrl = `/api/vcm/credential-types?${params}`
+      console.log("Request URL:", requestUrl)
+      console.log("Request params:", Object.fromEntries(params.entries()))
+
+      const requestStart = Date.now()
+
+      const response = await fetch(requestUrl, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
       })
 
+      const requestTime = Date.now() - requestStart
+      console.log("Response received:", {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        requestTime,
+      })
+
       if (!response.ok) {
         const errorText = await response.text()
+        console.error("HTTP Error Response:", errorText)
         throw new Error(`HTTP ${response.status}: ${errorText}`)
       }
 
       const result = await response.json()
-      console.log("Credential types fetch result:", result)
+      console.log("Response data:", result)
 
       if (!result.success) {
         throw new Error(result.message || "クレデンシャルタイプの取得に失敗しました")
       }
 
       const credentialTypes = result.credentialTypes || []
+      console.log("Credential types to sync:", credentialTypes.length)
 
       // クライアントサイドでローカルストレージに保存
       let syncedCount = 0
@@ -361,6 +383,8 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
 
       for (const vcmType of credentialTypes) {
         try {
+          console.log("Processing credential type:", vcmType.id, vcmType.name)
+
           // VCMタイプをローカルテンプレート形式に変換
           const template = convertVCMTypeToLocalTemplate(vcmType)
 
@@ -371,8 +395,11 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
 
           LocalStorageHelper.setItem("vcm_synced_templates", updatedTemplates)
           syncedCount++
+          console.log("Successfully synced:", template.id)
         } catch (error) {
-          errors.push(`Failed to sync ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`)
+          const errorMsg = `Failed to sync ${vcmType.name}: ${error instanceof Error ? error.message : "不明なエラー"}`
+          errors.push(errorMsg)
+          console.error("Sync error for", vcmType.id, ":", error)
         }
       }
 
@@ -382,10 +409,22 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
         errors,
         lastSync: new Date().toISOString(),
         mode: result.mode,
-        debugInfo: result.debugInfo,
+        debugInfo: {
+          ...result.debugInfo,
+          clientRequestTime: requestTime,
+          totalProcessingTime: Date.now() - requestStart,
+        },
+        requestDetails: {
+          url: requestUrl,
+          method: "GET",
+          params: Object.fromEntries(params.entries()),
+          responseStatus: response.status,
+          responseTime: requestTime,
+        },
         errorDetails: result.errorDetails,
       }
 
+      console.log("Sync completed:", syncResult)
       setSyncResult(syncResult)
 
       if (syncResult.success) {
@@ -395,13 +434,20 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
         VCMConfigManager.saveConfig(updatedConfig)
       }
     } catch (error) {
-      console.error("Sync error:", error)
-      setSyncResult({
+      console.error("=== Sync error ===", error)
+      const errorResult = {
         success: false,
         synced: 0,
         errors: [error instanceof Error ? error.message : "同期に失敗しました"],
         lastSync: new Date().toISOString(),
-      })
+        errorDetails: {
+          type: "CLIENT_ERROR",
+          errorMessage: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
+          timestamp: new Date().toISOString(),
+        },
+      }
+      setSyncResult(errorResult)
     } finally {
       setIsSyncing(false)
     }
@@ -886,6 +932,46 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                         </div>
                       )}
 
+                      {/* リクエスト詳細情報 */}
+                      {syncResult.requestDetails && (
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-sm font-medium">リクエスト詳細</summary>
+                          <div className="mt-2 p-3 bg-gray-50 rounded text-xs">
+                            <div className="space-y-2">
+                              <div>
+                                <strong>URL:</strong> {syncResult.requestDetails.url}
+                              </div>
+                              <div>
+                                <strong>メソッド:</strong> {syncResult.requestDetails.method}
+                              </div>
+                              <div>
+                                <strong>レスポンスステータス:</strong> {syncResult.requestDetails.responseStatus}
+                              </div>
+                              <div>
+                                <strong>レスポンス時間:</strong> {syncResult.requestDetails.responseTime}ms
+                              </div>
+                              <div>
+                                <strong>パラメータ:</strong>
+                                <pre className="mt-1 text-xs bg-white p-2 rounded border">
+                                  {JSON.stringify(syncResult.requestDetails.params, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                      )}
+
+                      {/* デバッグ情報 */}
+                      {syncResult.debugInfo && (
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-sm font-medium">デバッグ情報</summary>
+                          <div className="mt-2 p-3 bg-gray-50 rounded text-xs">
+                            <pre className="whitespace-pre-wrap">{JSON.stringify(syncResult.debugInfo, null, 2)}</pre>
+                          </div>
+                        </details>
+                      )}
+
+                      {/* エラー詳細情報 */}
                       {syncResult.errorDetails && (
                         <details className="mt-3">
                           <summary className="cursor-pointer text-sm font-medium">詳細なエラー情報</summary>
@@ -907,11 +993,25 @@ export function VCMConnectionSetup({ onConfigChange }: VCMConnectionSetupProps) 
                               {syncResult.errorDetails.connectionDetails && (
                                 <div>
                                   <strong>接続先:</strong> {syncResult.errorDetails.connectionDetails.endpoint}
+                                  <div className="mt-1">
+                                    <strong>リクエストヘッダー:</strong>
+                                    <pre className="mt-1 text-xs bg-white p-2 rounded border">
+                                      {JSON.stringify(syncResult.errorDetails.connectionDetails.headers, null, 2)}
+                                    </pre>
+                                  </div>
                                 </div>
                               )}
                               {syncResult.errorDetails.responseTime && (
                                 <div>
                                   <strong>レスポンス時間:</strong> {syncResult.errorDetails.responseTime}ms
+                                </div>
+                              )}
+                              {syncResult.errorDetails.stack && (
+                                <div>
+                                  <strong>スタックトレース:</strong>
+                                  <pre className="mt-1 text-xs bg-white p-2 rounded border whitespace-pre-wrap">
+                                    {syncResult.errorDetails.stack}
+                                  </pre>
                                 </div>
                               )}
                               {syncResult.errorDetails.troubleshooting && (
