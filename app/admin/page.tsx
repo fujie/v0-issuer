@@ -24,6 +24,15 @@ const VCMCredentialBrowser = dynamic(
   },
 )
 
+// Dynamically import IssuerMetadataDisplay
+const IssuerMetadataDisplay = dynamic(
+  () => import("@/components/issuer-metadata-display").then((mod) => ({ default: mod.IssuerMetadataDisplay })),
+  {
+    ssr: false,
+    loading: () => <div className="p-4">Issuer Metadataを読み込み中...</div>,
+  },
+)
+
 export default function AdminPage() {
   const [isVCMConfigured, setIsVCMConfigured] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
@@ -86,9 +95,10 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="vcm-connection" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="vcm-connection">VCM連携設定</TabsTrigger>
           <TabsTrigger value="credential-types">クレデンシャルタイプ</TabsTrigger>
+          <TabsTrigger value="issuer-metadata">Issuer Metadata</TabsTrigger>
         </TabsList>
 
         <TabsContent value="vcm-connection" className="mt-6">
@@ -97,6 +107,10 @@ export default function AdminPage() {
 
         <TabsContent value="credential-types" className="mt-6">
           <VCMCredentialBrowser />
+        </TabsContent>
+
+        <TabsContent value="issuer-metadata" className="mt-6">
+          <IssuerMetadataDisplay />
         </TabsContent>
       </Tabs>
     </div>

@@ -28,7 +28,27 @@ export class VCMConfigManager {
     return typeof window !== "undefined"
   }
 
+  private static isServer(): boolean {
+    return typeof window === "undefined" && typeof process !== "undefined"
+  }
+
   static getConfig(): VCMConnectionConfig | null {
+    // サーバーサイドでは環境変数から取得を試行
+    if (this.isServer()) {
+      try {
+        const envConfig = process.env.VCM_CONFIG
+        if (envConfig) {
+          console.log("VCMConfigManager.getConfig: Loading from environment variable")
+          return JSON.parse(envConfig)
+        }
+      } catch (error) {
+        console.error("VCMConfigManager.getConfig: Error parsing environment config:", error)
+      }
+      console.log("VCMConfigManager.getConfig: No server-side config found")
+      return null
+    }
+
+    // クライアントサイドではlocalStorageから取得
     if (!this.isClient()) {
       console.log("VCMConfigManager.getConfig: Not on client side")
       return null
@@ -197,6 +217,7 @@ export class VCMConfigManager {
     const config = this.getConfig()
     return {
       isClient: this.isClient(),
+      isServer: this.isServer(),
       configKey: this.CONFIG_KEY,
       configExists: !!config,
       configEnabled: config?.enabled,
@@ -206,6 +227,11 @@ export class VCMConfigManager {
       isConfigured: this.isConfigured(),
       rawConfig: config,
       localStorageKeys: this.isClient() ? Object.keys(localStorage) : [],
+      environmentVariables: this.isServer()
+        ? {
+            hasVcmConfig: !!process.env.VCM_CONFIG,
+          }
+        : null,
     }
   }
 }
