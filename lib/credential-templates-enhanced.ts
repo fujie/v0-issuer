@@ -161,13 +161,37 @@ export class CredentialTemplateManager {
         }
       }
 
-      // Save synced templates
-      console.log("Saving synced templates:", syncedTemplates.length)
+      // Save synced templates locally
+      console.log("Saving synced templates locally:", syncedTemplates.length)
       this.saveSyncedTemplates(syncedTemplates)
 
       // Update last sync time
       console.log("Updating last sync time")
       VCMConfigManager.updateLastSync()
+
+      // Sync templates to server
+      try {
+        console.log("Syncing templates to server...")
+        const allTemplates = await this.getAllTemplates()
+        const response = await fetch("/api/vcm/sync-templates", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ templates: allTemplates }),
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+          console.log("Server sync successful:", result)
+        } else {
+          console.error("Server sync failed:", response.status, response.statusText)
+          errors.push("サーバーへの同期に失敗しました")
+        }
+      } catch (serverSyncError) {
+        console.error("Error syncing to server:", serverSyncError)
+        errors.push("サーバーへの同期でエラーが発生しました")
+      }
 
       // キャッシュを無効化
       this.cachedTemplates = null
@@ -283,6 +307,37 @@ export class CredentialTemplateManager {
     // キャッシュを無効化して強制的に再読み込み
     this.cachedTemplates = null
     return this.getAllTemplates()
+  }
+
+  // サーバー同期状況を取得
+  static async getServerSyncStatus(): Promise<{
+    hasSyncedData: boolean
+    lastSync: string | null
+    syncedTemplatesCount: number
+    syncedTemplates: Array<{ id: string; name: string; source: string }>
+  }> {
+    try {
+      const response = await fetch("/api/vcm/sync-templates")
+      if (response.ok) {
+        return await response.json()
+      } else {
+        console.error("Failed to get server sync status:", response.status)
+        return {
+          hasSyncedData: false,
+          lastSync: null,
+          syncedTemplatesCount: 0,
+          syncedTemplates: [],
+        }
+      }
+    } catch (error) {
+      console.error("Error getting server sync status:", error)
+      return {
+        hasSyncedData: false,
+        lastSync: null,
+        syncedTemplatesCount: 0,
+        syncedTemplates: [],
+      }
+    }
   }
 
   // デバッグ用メソッド

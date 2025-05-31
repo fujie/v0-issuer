@@ -4,10 +4,11 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { Copy, Check, RefreshCw } from "lucide-react"
+import { Copy, Check, RefreshCw, FolderSyncIcon as Sync, AlertCircle } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { CredentialTemplateManager, type EnhancedCredentialTemplate } from "@/lib/credential-templates-enhanced"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface OpenID4VCICredentialConfiguration {
   format: string
@@ -45,6 +46,13 @@ interface IssuerMetadata {
   credential_configurations_supported: Record<string, OpenID4VCICredentialConfiguration>
 }
 
+interface ServerSyncStatus {
+  hasSyncedData: boolean
+  lastSync: string | null
+  syncedTemplatesCount: number
+  syncedTemplates: Array<{ id: string; name: string; source: string }>
+}
+
 export function IssuerMetadataDisplay() {
   const [copied, setCopied] = useState(false)
   const [metadata, setMetadata] = useState<IssuerMetadata | null>(null)
@@ -52,11 +60,14 @@ export function IssuerMetadataDisplay() {
   const [templates, setTemplates] = useState<EnhancedCredentialTemplate[]>([])
   const [showVCM, setShowVCM] = useState(true)
   const [showStatic, setShowStatic] = useState(true)
+  const [serverSyncStatus, setServerSyncStatus] = useState<ServerSyncStatus | null>(null)
+  const [syncLoading, setSyncLoading] = useState(false)
   const [endpointStatus, setEndpointStatus] = useState<{
     loading: boolean
     success?: boolean
     message?: string
     data?: any
+    error?: string
   }>({
     loading: false,
   })
@@ -125,6 +136,16 @@ export function IssuerMetadataDisplay() {
       setMetadata(getDefaultMetadata())
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadServerSyncStatus = async () => {
+    try {
+      const status = await CredentialTemplateManager.getServerSyncStatus()
+      setServerSyncStatus(status)
+      console.log("Server sync status:", status)
+    } catch (error) {
+      console.error("Error loading server sync status:", error)
     }
   }
 
@@ -206,6 +227,7 @@ export function IssuerMetadataDisplay() {
 
   useEffect(() => {
     generateMetadata()
+    loadServerSyncStatus()
   }, [showVCM, showStatic])
 
   const copyToClipboard = () => {
@@ -218,6 +240,50 @@ export function IssuerMetadataDisplay() {
 
   const refreshMetadata = () => {
     generateMetadata()
+    loadServerSyncStatus()
+  }
+
+  const syncToServer = async () => {
+    try {
+      setSyncLoading(true)
+      console.log("Manual sync to server...")
+      const allTemplates = await CredentialTemplateManager.getAllTemplates()
+
+      // VCMテンプレートの数を確認
+      const vcmTemplates = allTemplates.filter((t) => t.source === "vcm")
+      console.log(`Found ${vcmTemplates.length} VCM templates to sync`)
+
+      if (vcmTemplates.length === 0) {
+        alert("同期するVCMテンプレートがありません。先にVCMからテンプレートを同期してください。")
+        setSyncLoading(false)
+        return
+      }
+
+      const response = await fetch("/api/vcm/sync-templates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ templates: allTemplates }),
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        console.log("Manual server sync successful:", result)
+        alert(`サーバー同期が完了しました。${result.syncedCount}個のテンプレートを同期しました。`)
+      } else {
+        console.error("Manual server sync failed:", response.status, result)
+        alert(`サーバー同期に失敗しました: ${result.error || response.statusText}`)
+      }
+
+      await loadServerSyncStatus()
+    } catch (error) {
+      console.error("Error in manual sync:", error)
+      alert(`同期エラー: ${error instanceof Error ? error.message : "不明なエラー"}`)
+    } finally {
+      setSyncLoading(false)
+    }
   }
 
   const testEndpoint = async () => {
@@ -225,7 +291,7 @@ export function IssuerMetadataDisplay() {
     try {
       console.log("Testing /.well-known/openid-credential-issuer endpoint...")
 
-      const response = await fetch("/.well-known/openid-credential-issuer", {
+      const response = await fetch("/api/well-known/openid-credential-issuer", {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -244,6 +310,7 @@ export function IssuerMetadataDisplay() {
           loading: false,
           success: false,
           message: `HTTP ${response.status}: エンドポイントが見つからないか、エラーが発生しました`,
+          error: errorText,
           data: {
             status: response.status,
             statusText: response.statusText,
@@ -264,6 +331,7 @@ export function IssuerMetadataDisplay() {
           loading: false,
           success: false,
           message: "エンドポイントからJSONではないレスポンスが返されました（おそらく404エラーページ）",
+          error: textResponse,
           data: {
             contentType,
             body: textResponse.substring(0, 500) + (textResponse.length > 500 ? "..." : ""),
@@ -277,11 +345,14 @@ export function IssuerMetadataDisplay() {
 
       // credential_configurations_supportedの数を確認
       const configCount = Object.keys(data.credential_configurations_supported || {}).length
+      const vcmConfigCount = Object.keys(data.credential_configurations_supported || {}).filter((key) =>
+        key.includes("-vcm"),
+      ).length
 
       setEndpointStatus({
         loading: false,
         success: true,
-        message: `エンドポイントから正常にメタデータを取得しました（${configCount}個のcredential configurations）`,
+        message: `エンドポイントから正常にメタデータを取得しました（${configCount}個のcredential configurations、うち${vcmConfigCount}個がVCM）`,
         data,
       })
     } catch (error) {
@@ -302,6 +373,7 @@ export function IssuerMetadataDisplay() {
         loading: false,
         success: false,
         message: `エラー: ${errorMessage}`,
+        error: errorMessage,
       })
     }
   }
@@ -310,10 +382,10 @@ export function IssuerMetadataDisplay() {
     setEndpointStatus({ loading: true })
 
     const endpoints = [
+      "/api/well-known/openid-credential-issuer",
       "/.well-known/openid-credential-issuer",
       "/api/credential-issuer/.well-known/openid-credential-issuer",
       "/api/credential-issuer/metadata",
-      "/api/well-known/openid-credential-issuer",
     ]
 
     for (const endpoint of endpoints) {
@@ -332,11 +404,14 @@ export function IssuerMetadataDisplay() {
           if (contentType && contentType.includes("application/json")) {
             const data = await response.json()
             const configCount = Object.keys(data.credential_configurations_supported || {}).length
+            const vcmConfigCount = Object.keys(data.credential_configurations_supported || {}).filter((key) =>
+              key.includes("-vcm"),
+            ).length
 
             setEndpointStatus({
               loading: false,
               success: true,
-              message: `${endpoint} から正常にメタデータを取得しました（${configCount}個のcredential configurations）`,
+              message: `${endpoint} から正常にメタデータを取得しました（${configCount}個のcredential configurations、うち${vcmConfigCount}個がVCM）`,
               data,
             })
             return
@@ -351,6 +426,7 @@ export function IssuerMetadataDisplay() {
       loading: false,
       success: false,
       message: "すべてのエンドポイントでメタデータの取得に失敗しました",
+      error: "すべてのエンドポイントでメタデータの取得に失敗しました",
     })
   }
 
@@ -435,6 +511,42 @@ export function IssuerMetadataDisplay() {
             </div>
           </div>
 
+          {/* サーバー同期状況 */}
+          <div className="mb-4 p-3 bg-yellow-50 rounded-md">
+            <h4 className="font-medium text-sm mb-2">サーバー同期状況</h4>
+            {serverSyncStatus ? (
+              <div className="text-xs space-y-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2 py-1 rounded text-xs ${
+                      serverSyncStatus.hasSyncedData ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {serverSyncStatus.hasSyncedData ? "同期済み" : "未同期"}
+                  </span>
+                  <span>{serverSyncStatus.syncedTemplatesCount}個のテンプレートが同期されています</span>
+                </div>
+                {serverSyncStatus.lastSync && (
+                  <div>最終同期: {new Date(serverSyncStatus.lastSync).toLocaleString("ja-JP")}</div>
+                )}
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={syncToServer}
+                    disabled={syncLoading}
+                    className="flex items-center gap-1"
+                  >
+                    <Sync className="h-4 w-4" />
+                    {syncLoading ? "同期中..." : "手動同期"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-500">同期状況を読み込み中...</div>
+            )}
+          </div>
+
           <div className="mb-4 p-3 bg-blue-50 rounded-md">
             <h4 className="font-medium text-sm mb-2">含まれるCredential Configurations:</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
@@ -489,6 +601,25 @@ export function IssuerMetadataDisplay() {
                 </div>
               )}
             </div>
+          )}
+
+          {endpointStatus.error && !endpointStatus.success && (
+            <Alert variant="destructive" className="mt-2">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>エンドポイントエラー</AlertTitle>
+              <AlertDescription>
+                <p>エンドポイントへのアクセスに問題があります。以下の点を確認してください：</p>
+                <ul className="list-disc pl-5 mt-2 text-sm">
+                  <li>Next.jsの設定でドットで始まるパスが許可されているか</li>
+                  <li>サーバー同期が正常に完了しているか</li>
+                  <li>VCMテンプレートが存在するか</li>
+                </ul>
+                <p className="mt-2 text-sm">
+                  <strong>ヒント：</strong> まず「手動同期」ボタンを押してVCMテンプレートをサーバーに同期してから、
+                  「代替エンドポイントをテスト」ボタンを押してください。
+                </p>
+              </AlertDescription>
+            </Alert>
           )}
         </div>
 
