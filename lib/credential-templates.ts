@@ -30,8 +30,8 @@ export interface CredentialClaim {
   defaultValue?: any
 }
 
-// 利用可能なクレデンシャルテンプレート
-export const credentialTemplates: CredentialTemplate[] = [
+// 静的なクレデンシャルテンプレート（フォールバック用）
+export const staticCredentialTemplates: CredentialTemplate[] = [
   {
     id: "student-credential",
     name: "学生証明書",
@@ -308,10 +308,130 @@ export const credentialTemplates: CredentialTemplate[] = [
   },
 ]
 
-export function getCredentialTemplate(templateId: string): CredentialTemplate | undefined {
-  return credentialTemplates.find((template) => template.id === templateId)
+// 後方互換性のために、staticCredentialTemplatesをcredentialTemplatesとしてもエクスポート
+export const credentialTemplates = staticCredentialTemplates
+
+// VCMから同期されたテンプレートを含む全テンプレートを取得
+export async function getCredentialTemplates(): Promise<CredentialTemplate[]> {
+  console.log("=== Getting All Credential Templates ===")
+
+  try {
+    // CredentialTemplateManagerがクライアントサイドでのみ利用可能かチェック
+    if (typeof window !== "undefined") {
+      // クライアントサイド: CredentialTemplateManagerを使用
+      const { CredentialTemplateManager } = await import("./credential-templates-enhanced")
+      const allTemplates = await CredentialTemplateManager.getAllTemplates()
+
+      console.log("Retrieved templates from CredentialTemplateManager:", allTemplates.length)
+      console.log("Template breakdown:", {
+        static: allTemplates.filter((t) => t.source === "static").length,
+        vcm: allTemplates.filter((t) => t.source === "vcm").length,
+      })
+
+      // EnhancedCredentialTemplateをCredentialTemplateに変換
+      return allTemplates.map((template) => ({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        type: Array.isArray(template.type) ? template.type : [template.type],
+        context: template.context,
+        claims: template.claims,
+        display: template.display,
+        validityPeriod: template.validityPeriod,
+        issuer: template.issuer,
+      }))
+    } else {
+      // サーバーサイド: グローバルメモリから取得を試行
+      console.log("Server-side: Attempting to get VCM templates from global memory")
+
+      const vcmTemplates = getVCMTemplatesFromGlobal()
+      const allTemplates = [...staticCredentialTemplates, ...vcmTemplates]
+
+      console.log("Server-side templates:", {
+        static: staticCredentialTemplates.length,
+        vcm: vcmTemplates.length,
+        total: allTemplates.length,
+      })
+
+      return allTemplates
+    }
+  } catch (error) {
+    console.error("Error getting credential templates:", error)
+    console.log("Falling back to static templates only")
+    return staticCredentialTemplates
+  }
 }
 
+// 特定のテンプレートIDでテンプレートを取得
+export async function getCredentialTemplate(templateId: string): Promise<CredentialTemplate | undefined> {
+  console.log("=== Getting Specific Credential Template ===")
+  console.log("Template ID:", templateId)
+
+  try {
+    const allTemplates = await getCredentialTemplates()
+    const template = allTemplates.find((template) => template.id === templateId)
+
+    if (template) {
+      console.log("Found template:", template.name, "source:", template.source || "static")
+    } else {
+      console.log("Template not found:", templateId)
+    }
+
+    return template
+  } catch (error) {
+    console.error("Error getting specific template:", error)
+
+    // フォールバック: 静的テンプレートから検索
+    const staticTemplate = staticCredentialTemplates.find((template) => template.id === templateId)
+    if (staticTemplate) {
+      console.log("Found static template as fallback:", staticTemplate.name)
+    }
+    return staticTemplate
+  }
+}
+
+// サーバーサイドでグローバルメモリからVCMテンプレートを取得
+function getVCMTemplatesFromGlobal(): CredentialTemplate[] {
+  try {
+    if (typeof globalThis !== "undefined" && globalThis.vcmConfig?.syncedTemplates) {
+      const vcmTemplates = globalThis.vcmConfig.syncedTemplates
+      console.log("Found VCM templates in global memory:", vcmTemplates.length)
+
+      // EnhancedCredentialTemplateをCredentialTemplateに変換
+      return vcmTemplates.map((template: any) => ({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        type: Array.isArray(template.type) ? template.type : [template.type],
+        context: template.context,
+        claims: template.claims,
+        display: template.display,
+        validityPeriod: template.validityPeriod,
+        issuer: template.issuer,
+      }))
+    } else {
+      console.log("No VCM templates found in global memory")
+      return []
+    }
+  } catch (error) {
+    console.error("Error getting VCM templates from global memory:", error)
+    return []
+  }
+}
+
+// 利用可能なテンプレートの一覧を取得（後方互換性のため）
 export function getAvailableTemplates(): CredentialTemplate[] {
-  return credentialTemplates
+  console.log("getAvailableTemplates called - redirecting to getCredentialTemplates")
+  // 非同期関数を同期的に呼び出すことはできないため、静的テンプレートを返す
+  // 実際の使用では getCredentialTemplates() を使用することを推奨
+  return staticCredentialTemplates
+}
+
+// デフォルトエクスポート（後方互換性のため）
+export default {
+  getCredentialTemplates,
+  getCredentialTemplate,
+  getAvailableTemplates,
+  staticCredentialTemplates,
+  credentialTemplates, // 後方互換性のために追加
 }

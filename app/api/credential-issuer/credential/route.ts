@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { getToken } from "@/lib/storage"
 import { getCredentialTemplate } from "@/lib/credential-templates"
-import { CredentialTemplateManager } from "@/lib/credential-templates-enhanced"
 
 // CORS headers helper function
 function setCorsHeaders(response: NextResponse) {
@@ -167,36 +166,27 @@ async function getCredentialTemplateById(configId: string) {
   console.log("=== Getting Credential Template ===")
   console.log("Configuration ID:", configId)
 
-  // First, try to get from static templates
-  const staticTemplate = getCredentialTemplate(configId)
-  if (staticTemplate) {
-    console.log("Found static template:", staticTemplate.name)
-    return staticTemplate
-  }
-
-  // Then, try to get from VCM templates
+  // 新しいgetCredentialTemplate関数を使用
   try {
-    const vcmTemplates = await CredentialTemplateManager.getAllTemplates()
-    const vcmTemplate = vcmTemplates.find((t) => t.id === configId)
-    if (vcmTemplate) {
-      console.log("Found VCM template:", vcmTemplate.name)
-      return vcmTemplate
+    const template = await getCredentialTemplate(configId)
+    if (template) {
+      console.log("Found template:", template.name)
+      return template
     }
   } catch (error) {
-    console.log("Error getting VCM templates:", error)
+    console.log("Error getting template:", error)
   }
 
-  // Check for VCM template with -vcm suffix
+  // VCMテンプレートの-vcmサフィックス付きで再試行
   const vcmConfigId = configId.endsWith("-vcm") ? configId : `${configId}-vcm`
   try {
-    const vcmTemplates = await CredentialTemplateManager.getAllTemplates()
-    const vcmTemplate = vcmTemplates.find((t) => t.id === vcmConfigId)
-    if (vcmTemplate) {
-      console.log("Found VCM template with suffix:", vcmTemplate.name)
-      return vcmTemplate
+    const template = await getCredentialTemplate(vcmConfigId)
+    if (template) {
+      console.log("Found VCM template with suffix:", template.name)
+      return template
     }
   } catch (error) {
-    console.log("Error getting VCM templates with suffix:", error)
+    console.log("Error getting VCM template with suffix:", error)
   }
 
   console.log("Template not found for configuration ID:", configId)
