@@ -16,8 +16,8 @@ export async function GET(request: Request) {
 
     // 新しいライブラリを使用してメタデータを生成（静的テンプレートのみ）
     const metadata = await IssuerMetadataGenerator.generateIssuerMetadata(baseUrl, {
-      showVCM: false,
-      showStatic: true,
+      showVCM: true,
+      showStatic: false,
       useServerSync: false, // クライアントサイドでの同期データを使用しない
     })
 
