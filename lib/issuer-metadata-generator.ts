@@ -59,7 +59,7 @@ export class IssuerMetadataGenerator {
     } = {},
   ): Promise<IssuerMetadata> {
     console.log("IssuerMetadataGenerator: Generating metadata for baseUrl:", baseUrl)
-    const { showVCM = true, showStatic = true, useServerSync = false } = options
+    const { showVCM = true, showStatic = true, useServerSync = true } = options
 
     try {
       // 基本的なメタデータ構造

@@ -26,7 +26,7 @@ export class CredentialTemplateManager {
     const now = Date.now()
     if (this.cachedTemplates && now - this.lastCacheTime < this.CACHE_TTL) {
       console.log("Returning cached templates:", this.cachedTemplates.length)
-      return this.cachedTemplates
+//      return this.cachedTemplates
     }
 
     const staticTemplatesEnhanced: EnhancedCredentialTemplate[] = staticTemplates.map((template) => ({
