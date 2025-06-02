@@ -2,9 +2,64 @@ import { NextResponse } from "next/server"
 import { IssuerMetadataGenerator } from "@/lib/issuer-metadata-generator"
 import { headers } from "next/headers"
 
+// グローバル型定義
+declare global {
+  var vcmConfig:
+    | {
+        enabled: boolean
+        useMockData: boolean
+        lastSync: string
+        syncedTemplates: any[]
+      }
+    | undefined
+}
+
+// VCM設定を環境変数から読み込む
+function loadVcmConfigFromEnv() {
+  try {
+    const vcmConfigStr = process.env.VCM_CONFIG
+    if (vcmConfigStr) {
+      console.log("API: Found VCM_CONFIG environment variable")
+      try {
+        const vcmConfig = JSON.parse(vcmConfigStr)
+        console.log("API: Parsed VCM_CONFIG:", {
+          enabled: vcmConfig.enabled,
+          templatesCount: vcmConfig.syncedTemplates?.length || 0,
+        })
+
+        // グローバル変数に保存
+        if (typeof global !== "undefined") {
+          global.vcmConfig = vcmConfig
+          console.log("API: Saved VCM_CONFIG to global.vcmConfig")
+        }
+
+        return vcmConfig
+      } catch (error) {
+        console.error("API: Error parsing VCM_CONFIG:", error)
+      }
+    } else {
+      console.log("API: No VCM_CONFIG environment variable found")
+    }
+  } catch (error) {
+    console.error("API: Error accessing environment variable:", error)
+  }
+  return null
+}
+
 export async function GET(request: Request) {
   try {
     console.log("API: Generating issuer metadata")
+
+    // VCM設定を環境変数から読み込む
+    const vcmConfig = loadVcmConfigFromEnv()
+
+    // グローバル変数の状態を確認
+    if (typeof global !== "undefined") {
+      console.log("API: global.vcmConfig exists:", !!global.vcmConfig)
+      if (global.vcmConfig) {
+        console.log("API: global.vcmConfig templates count:", global.vcmConfig.syncedTemplates?.length || 0)
+      }
+    }
 
     // リクエストURLからベースURLを取得
     const headersList = headers()

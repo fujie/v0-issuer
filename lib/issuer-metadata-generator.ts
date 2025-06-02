@@ -43,6 +43,18 @@ export interface ServerSyncStatus {
   syncedTemplates: Array<{ id: string; name: string; source: string }>
 }
 
+// グローバル型定義
+declare global {
+  var vcmConfig:
+    | {
+        enabled: boolean
+        useMockData: boolean
+        lastSync: string
+        syncedTemplates: any[]
+      }
+    | undefined
+}
+
 export class IssuerMetadataGenerator {
   /**
    * Issuer Metadataを生成する
@@ -106,6 +118,121 @@ export class IssuerMetadataGenerator {
           )
         } catch (error) {
           console.error(`IssuerMetadataGenerator: Error converting template ${template.id}:`, error)
+        }
+      }
+
+      // サーバーサイドでVCMデータが取得できなかった場合、環境変数から直接読み込む
+      if (
+        showVCM &&
+        filteredTemplates.filter((t) => t.source === "vcm").length === 0 &&
+        typeof global !== "undefined"
+      ) {
+        console.log("IssuerMetadataGenerator: No VCM templates found, trying to load from environment variable")
+
+        try {
+          // 環境変数からVCM設定を取得
+          const vcmConfigStr = process.env.VCM_CONFIG
+          if (vcmConfigStr) {
+            console.log("IssuerMetadataGenerator: Found VCM_CONFIG environment variable")
+
+            try {
+              const vcmConfig = JSON.parse(vcmConfigStr)
+              console.log("IssuerMetadataGenerator: Parsed VCM_CONFIG:", {
+                enabled: vcmConfig.enabled,
+                templatesCount: vcmConfig.syncedTemplates?.length || 0,
+              })
+
+              // グローバル変数に保存（サーバーサイドでのみ）
+              if (typeof global !== "undefined" && !global.vcmConfig) {
+                global.vcmConfig = vcmConfig
+                console.log("IssuerMetadataGenerator: Saved VCM_CONFIG to global.vcmConfig")
+              }
+
+              // 同期されたテンプレートを処理
+              if (vcmConfig.syncedTemplates && Array.isArray(vcmConfig.syncedTemplates)) {
+                for (const template of vcmConfig.syncedTemplates) {
+                  try {
+                    const enhancedTemplate: EnhancedCredentialTemplate = {
+                      id: template.id,
+                      name: template.name || template.id,
+                      source: "vcm",
+                      claims: template.claims || [],
+                      display: {
+                        name: template.name || template.id,
+                        locale: "ja-JP",
+                        backgroundColor: template.display?.backgroundColor || "#1e40af",
+                        textColor: template.display?.textColor || "#ffffff",
+                        logo: template.display?.logo,
+                      },
+                    }
+
+                    const configuration = this.convertTemplateToConfiguration(enhancedTemplate)
+                    issuerMetadata.credential_configurations_supported[template.id] = configuration
+                    console.log(`IssuerMetadataGenerator: Added VCM configuration for ${template.id} from env var`)
+                  } catch (error) {
+                    console.error(`IssuerMetadataGenerator: Error converting VCM template ${template.id}:`, error)
+                  }
+                }
+              }
+            } catch (error) {
+              console.error("IssuerMetadataGenerator: Error parsing VCM_CONFIG:", error)
+            }
+          } else {
+            console.log("IssuerMetadataGenerator: No VCM_CONFIG environment variable found")
+          }
+        } catch (error) {
+          console.error("IssuerMetadataGenerator: Error accessing environment variable:", error)
+        }
+      }
+
+      // グローバルメモリからVCMデータを直接読み込む（サーバーサイドでのフォールバック）
+      if (showVCM && filteredTemplates.filter((t) => t.source === "vcm").length === 0) {
+        console.log("IssuerMetadataGenerator: Trying to load VCM data from global memory")
+
+        // グローバル変数からVCM設定を取得
+        let vcmConfig: any = null
+
+        // Node.js環境（サーバーサイド）
+        if (typeof global !== "undefined" && global.vcmConfig) {
+          vcmConfig = global.vcmConfig
+          console.log("IssuerMetadataGenerator: Found VCM config in global.vcmConfig")
+        }
+        // ブラウザ環境（クライアントサイド）
+        else if (typeof globalThis !== "undefined" && globalThis.vcmConfig) {
+          vcmConfig = globalThis.vcmConfig
+          console.log("IssuerMetadataGenerator: Found VCM config in globalThis.vcmConfig")
+        }
+
+        if (vcmConfig && vcmConfig.syncedTemplates && Array.isArray(vcmConfig.syncedTemplates)) {
+          console.log(
+            `IssuerMetadataGenerator: Found ${vcmConfig.syncedTemplates.length} VCM templates in global memory`,
+          )
+
+          for (const template of vcmConfig.syncedTemplates) {
+            try {
+              const enhancedTemplate: EnhancedCredentialTemplate = {
+                id: template.id,
+                name: template.name || template.id,
+                source: "vcm",
+                claims: template.claims || [],
+                display: {
+                  name: template.name || template.id,
+                  locale: "ja-JP",
+                  backgroundColor: template.display?.backgroundColor || "#1e40af",
+                  textColor: template.display?.textColor || "#ffffff",
+                  logo: template.display?.logo,
+                },
+              }
+
+              const configuration = this.convertTemplateToConfiguration(enhancedTemplate)
+              issuerMetadata.credential_configurations_supported[template.id] = configuration
+              console.log(`IssuerMetadataGenerator: Added VCM configuration for ${template.id} from global memory`)
+            } catch (error) {
+              console.error(`IssuerMetadataGenerator: Error converting VCM template ${template.id}:`, error)
+            }
+          }
+        } else {
+          console.log("IssuerMetadataGenerator: No VCM templates found in global memory")
         }
       }
 
