@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const metadata = await IssuerMetadataGenerator.generateIssuerMetadata(baseUrl, {
       showVCM: true,
       showStatic: false,
-      useServerSync: false, // クライアントサイドでの同期データを使用しない
+      useServerSync: true, // クライアントサイドでの同期データを利用する
     })
 
     // CORSヘッダーを設定
