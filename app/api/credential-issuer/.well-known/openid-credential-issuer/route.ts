@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { OpenID4VCIMetadataGenerator } from "@/lib/openid4vci-utils"
+import { ServerMetadataGenerator } from "@/lib/server-metadata-generator"
 
 export async function GET(request: Request) {
   try {
@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     const baseUrl = `${url.protocol}//${url.host}`
 
     // OpenID4VCI Issuer Metadataを生成
-    const metadata = await OpenID4VCIMetadataGenerator.generateIssuerMetadata(baseUrl)
+    const metadata = await ServerMetadataGenerator.generateIssuerMetadata(baseUrl)
 
     // CORS対応
     return NextResponse.json(metadata, {

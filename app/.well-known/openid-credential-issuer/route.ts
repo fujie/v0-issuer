@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     console.log("Redirecting to API endpoint from:", baseUrl)
 
     // APIエンドポイントにリダイレクト
-    const redirectUrl = new URL("/api/well-known/openid-credential-issuer", baseUrl)
+    const redirectUrl = new URL("/api/.well-known/openid-credential-issuer", baseUrl)
 
     console.log("Redirect URL:", redirectUrl.toString())
 
