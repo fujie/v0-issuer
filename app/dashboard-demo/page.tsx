@@ -5,13 +5,16 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Check, Download, Copy, ExternalLink, Bug, Settings } from "lucide-react"
+import { Check, Download, Copy, ExternalLink, Bug, Settings, Key, Eye, EyeOff } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { QRCodeFallback } from "@/components/qr-code-fallback"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { CredentialTemplateSelectorEnhanced } from "@/components/credential-template-selector-enhanced"
 import { issueCredentialFromTemplate } from "@/lib/credential-service-enhanced"
 import { CredentialTemplateManager } from "@/lib/credential-templates-enhanced"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 
 // Demo user data
@@ -34,6 +37,19 @@ export default function DashboardDemo() {
   const [copied, setCopied] = useState(false)
   const [showTestDialog, setShowTestDialog] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null)
+
+  // PIN関連の状態
+  const [requirePin, setRequirePin] = useState(false)
+  const [generatedPin, setGeneratedPin] = useState<string | null>(null)
+  const [showPin, setShowPin] = useState(false)
+
+  // PIN生成関数
+  const generatePin = (length = 6): string => {
+    return Math.random()
+      .toString()
+      .slice(2, 2 + length)
+      .padStart(length, "0")
+  }
 
   const handleTemplateSelect = async (templateId: string, selectedClaims: string[]) => {
     setIsLoading(true)
@@ -136,18 +152,33 @@ export default function DashboardDemo() {
       const credentialOfferId = `offer_${Math.random().toString(36).substring(2, 15)}`
       const preAuthCode = `pre_auth_${Math.random().toString(36).substring(2, 15)}`
 
-      const credentialOfferObject = {
+      // PIN生成（必要な場合）
+      let pin: string | null = null
+      if (requirePin) {
+        pin = generatePin(6)
+        setGeneratedPin(pin)
+      } else {
+        setGeneratedPin(null)
+      }
+
+      // OpenID4VCI 1.0準拠のCredential Offer生成
+      const credentialOfferObject: any = {
         credential_issuer: `${window.location.origin}/api/credential-issuer`,
         credential_configuration_ids: [template.id],
         grants: {
-          authorization_code: {
-            issuer_state: `state_${Math.random().toString(36).substring(2, 10)}`,
-          },
           "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
             "pre-authorized_code": preAuthCode,
-            user_pin_required: false,
           },
         },
+      }
+
+      // OpenID4VCI 1.0仕様: PINが必要な場合のみtx_codeを追加
+      if (requirePin && pin) {
+        credentialOfferObject.grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].tx_code = {
+          input_mode: "numeric",
+          length: 6,
+          description: "ウォレットアプリで6桁のPINコードを入力してください",
+        }
       }
 
       const credentialOfferJson = JSON.stringify(credentialOfferObject)
@@ -188,6 +219,17 @@ export default function DashboardDemo() {
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error("Failed to copy:", err)
+    }
+  }
+
+  const handleCopyPin = async () => {
+    if (!generatedPin) return
+
+    try {
+      await navigator.clipboard.writeText(generatedPin)
+      // 一時的にフィードバックを表示
+    } catch (err) {
+      console.error("Failed to copy PIN:", err)
     }
   }
 
@@ -264,7 +306,30 @@ export default function DashboardDemo() {
                 Managerで定義されたテンプレートから証明書を選択して発行できます
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {/* PIN設定 */}
+              <div className="flex items-center space-x-2 p-4 bg-gray-50 rounded-lg">
+                <Key className="h-4 w-4 text-gray-600" />
+                <div className="flex-1">
+                  <Label htmlFor="require-pin" className="text-sm font-medium">
+                    PINコード認証を要求する
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    有効にすると、ウォレットアプリでPINコードの入力が必要になります
+                  </p>
+                </div>
+                <Switch id="require-pin" checked={requirePin} onCheckedChange={setRequirePin} />
+              </div>
+
+              {requirePin && (
+                <Alert>
+                  <Key className="h-4 w-4" />
+                  <AlertDescription>
+                    PINコード認証が有効です。証明書発行時に6桁のPINコードが生成され、ウォレットアプリでの入力が必要になります。
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <CredentialTemplateSelectorEnhanced onTemplateSelect={handleTemplateSelect} isLoading={isLoading} />
             </CardContent>
           </Card>
@@ -286,8 +351,37 @@ export default function DashboardDemo() {
               <Check className="h-5 w-5 text-green-500 mr-2" />
               {selectedTemplate?.display.name}が発行されました
             </DialogTitle>
-            <DialogDescription>OpenID4VCI ID2準拠のSD-JWT形式の証明書が正常に発行されました。</DialogDescription>
+            <DialogDescription>OpenID4VCI 1.0準拠のSD-JWT形式の証明書が正常に発行されました。</DialogDescription>
           </DialogHeader>
+
+          {/* PIN表示 */}
+          {generatedPin && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+              <div className="flex items-start space-x-3">
+                <Key className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-yellow-800">PINコード認証</h3>
+                  <p className="text-xs text-yellow-700 mt-1 mb-3">
+                    ウォレットアプリで以下のPINコードを入力してください：
+                  </p>
+                  <div className="flex items-center space-x-2">
+                    <div className="bg-white border border-yellow-300 rounded-md px-3 py-2 font-mono text-lg font-bold text-gray-900">
+                      {showPin ? generatedPin : "••••••"}
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setShowPin(!showPin)} className="h-8 px-2">
+                      {showPin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handleCopyPin} className="h-8 px-2">
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-yellow-600 mt-2">
+                    ※ このPINコードは一度のみ有効です。セキュリティのため、他の人と共有しないでください。
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <Tabs defaultValue="qrcode" className="w-full">
             <TabsList className="grid w-full grid-cols-4">
@@ -311,6 +405,11 @@ export default function DashboardDemo() {
                     <div className="w-full space-y-3">
                       <p className="text-xs text-gray-500 text-center">
                         QRコードをスキャンしてCredential Offerを受け取り、ウォレットで証明書を取得
+                        {generatedPin && (
+                          <span className="block mt-1 text-yellow-600 font-medium">
+                            ※ ウォレットアプリでPINコード（{showPin ? generatedPin : "••••••"}）の入力が必要です
+                          </span>
+                        )}
                       </p>
 
                       <div className="bg-gray-50 p-3 rounded-md">
@@ -350,7 +449,7 @@ export default function DashboardDemo() {
             <TabsContent value="offer" className="mt-4">
               <div className="space-y-4">
                 <div>
-                  <h4 className="text-sm font-medium mb-2">Credential Offer (OpenID4VCI ID2準拠)</h4>
+                  <h4 className="text-sm font-medium mb-2">Credential Offer (OpenID4VCI 1.0準拠)</h4>
                   <div className="bg-gray-50 p-4 rounded-md overflow-auto max-h-60">
                     <pre className="text-xs">{credentialOffer}</pre>
                   </div>
@@ -363,8 +462,13 @@ export default function DashboardDemo() {
                     <strong>credential_configuration_ids:</strong> 発行可能な証明書の設定ID
                   </p>
                   <p>
-                    <strong>grants:</strong> 利用可能な認可フロー（認可コードフロー、事前認可コードフロー）
+                    <strong>grants:</strong> 利用可能な認可フロー（事前認可コードフロー）
                   </p>
+                  {generatedPin && (
+                    <p>
+                      <strong>tx_code:</strong> PINコード認証設定（OpenID4VCI 1.0仕様準拠）
+                    </p>
+                  )}
                 </div>
               </div>
             </TabsContent>
@@ -432,6 +536,25 @@ export default function DashboardDemo() {
                               ))}
                             </div>
                           </div>
+                          {generatedPin && (
+                            <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+                              <h4 className="text-sm font-medium mb-2 text-yellow-800">PIN認証設定</h4>
+                              <div className="text-xs space-y-1">
+                                <p>
+                                  <strong>PINコード:</strong> {showPin ? generatedPin : "••••••"}
+                                </p>
+                                <p>
+                                  <strong>入力モード:</strong> numeric
+                                </p>
+                                <p>
+                                  <strong>桁数:</strong> 6
+                                </p>
+                                <p>
+                                  <strong>説明:</strong> ウォレットアプリで6桁のPINコードを入力してください
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </AccordionContent>
                     </AccordionItem>
@@ -569,6 +692,11 @@ export default function DashboardDemo() {
             <p>
               <strong>注意:</strong> 実際のウォレットアプリでは、QRコードをスキャンしてCredential
               Offerを取得し、OpenID4VCI認証フローを開始します。
+              {generatedPin && (
+                <span className="block mt-1 text-yellow-600">
+                  ※ PINコード認証が有効な場合、ウォレットアプリでPINコードの入力が必要です。
+                </span>
+              )}
             </p>
           </div>
         </DialogContent>
