@@ -1,31 +1,65 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+import { IssuerMetadataGenerator } from "@/lib/issuer-metadata-generator"
+import { headers } from "next/headers"
 
-export async function GET(request: NextRequest) {
-  console.log("Standard endpoint /.well-known/openid-credential-issuer called")
-
+export async function GET(request: Request) {
   try {
-    // リクエストURLからbaseURLを取得
-    const url = new URL(request.url)
-    const baseUrl = `${url.protocol}//${url.host}`
+    console.log("Well-known: Generating issuer metadata")
 
-    console.log("Redirecting to API endpoint from:", baseUrl)
+    // リクエストURLからベースURLを取得
+    const headersList = headers()
+    const host = headersList.get("host") || "localhost:3000"
+    const protocol = host.includes("localhost") ? "http" : "https"
+    const baseUrl = `${protocol}://${host}`
 
-    // APIエンドポイントにリダイレクト
-    const redirectUrl = new URL("/api/.well-known/openid-credential-issuer", baseUrl)
+    console.log("Well-known: Using baseUrl:", baseUrl)
 
-    console.log("Redirect URL:", redirectUrl.toString())
+    // 新しいライブラリを使用してメタデータを生成（静的テンプレートのみ）
+    const metadata = await IssuerMetadataGenerator.generateIssuerMetadata(baseUrl, {
+      showVCM: false,
+      showStatic: true,
+      useServerSync: false, // クライアントサイドでの同期データを使用しない
+    })
 
-    return NextResponse.redirect(redirectUrl)
+    // CORSヘッダーを設定
+    return NextResponse.json(metadata, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    })
   } catch (error) {
-    console.error("Error in standard endpoint redirect:", error)
+    console.error("Well-known: Error generating issuer metadata:", error)
 
-    // リダイレクトに失敗した場合は、直接レスポンスを返す
+    // エラーレスポンス
     return NextResponse.json(
       {
         error: "server_error",
-        error_description: "Failed to redirect to API endpoint",
+        error_description: "An error occurred generating issuer metadata",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 },
+      {
+        status: 500,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      },
     )
   }
+}
+
+export async function OPTIONS() {
+  return NextResponse.json(
+    {},
+    {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    },
+  )
 }
