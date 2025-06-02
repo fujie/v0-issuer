@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       grants: {
         "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
           "pre-authorized_code": preAuthCode,
-          user_pin_required: false,
+          // OpenID4VCI 1.0仕様: tx_codeを省略することでPINコード不要を示す
         },
       },
     }

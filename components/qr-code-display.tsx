@@ -118,3 +118,6 @@ function hashString(str: string): number[] {
   }
   return result
 }
+
+// 既存の名前付きエクスポートの後に追加
+export default QRCodeDisplay
